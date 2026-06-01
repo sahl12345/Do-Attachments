@@ -1,10 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import {
-  Dimensions,
-  FlatList,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,11 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GameCard } from "@/components/GameCard";
 import { Fonts } from "@/constants/fonts";
-import { GAMES, GameDef, getGameById } from "@/constants/games";
+import { GAMES, GameDef } from "@/constants/games";
 import { Session, generateId, useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const STEP_LABELS = ["اختار اللعبة", "أضف اللاعبين", "اعدادات الجلسة"];
 
@@ -36,20 +32,13 @@ export default function NewSessionScreen() {
   const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
   const [players, setPlayers] = useState<string[]>(["", "", "", ""]);
   const [targetScore, setTargetScore] = useState<number>(0);
-  const flatRef = useRef<FlatList>(null);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
-  const goTo = (s: number) => {
-    setStep(s);
-    flatRef.current?.scrollToIndex({ index: s, animated: true });
-  };
-
-  const canNext = () => {
+  const canNext = (): boolean => {
     if (step === 0) return !!selectedGame;
     if (step === 1) {
       const minPlayers = selectedGame?.minPlayers ?? 2;
-      const filled = players.filter((p) => p.trim().length > 0);
-      return filled.length >= minPlayers;
+      return players.filter((p) => p.trim().length > 0).length >= minPlayers;
     }
     return true;
   };
@@ -57,17 +46,13 @@ export default function NewSessionScreen() {
   const handleSelectGame = (game: GameDef) => {
     Haptics.selectionAsync();
     setSelectedGame(game);
-    const defaultPlayers = Array.from(
-      { length: Math.max(game.minPlayers, 2) },
-      (_, i) => players[i] ?? ""
-    );
-    if (defaultPlayers.length > players.length) setPlayers(defaultPlayers);
+    const count = Math.max(game.minPlayers, 2);
+    setPlayers(Array.from({ length: count }, (_, i) => players[i] ?? ""));
     setTargetScore(game.defaultTarget);
   };
 
   const addPlayer = () => {
-    if (!selectedGame) return;
-    if (players.length >= selectedGame.maxPlayers) return;
+    if (!selectedGame || players.length >= selectedGame.maxPlayers) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPlayers((prev) => [...prev, ""]);
   };
@@ -79,13 +64,30 @@ export default function NewSessionScreen() {
     setPlayers((prev) => prev.filter((_, idx) => idx !== i));
   };
 
+  const handleNext = () => {
+    if (!canNext()) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setStep((s) => s + 1);
+  };
+
+  const handleBack = () => {
+    if (step === 0) {
+      router.back();
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setStep((s) => s - 1);
+    }
+  };
+
   const handleStart = () => {
     if (!selectedGame) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const validPlayers = players
-      .map((n, i) => ({ id: generateId(), name: n.trim() || `لاعب ${i + 1}` }))
-      .filter((_, i) => i < selectedGame.maxPlayers)
-      .slice(0, players.filter((p) => p.trim()).length || selectedGame.minPlayers);
+      .filter((n, i) => i < selectedGame.maxPlayers)
+      .map((n, i) => ({
+        id: generateId(),
+        name: n.trim() || `لاعب ${i + 1}`,
+      }));
 
     const session: Session = {
       id: generateId(),
@@ -99,192 +101,16 @@ export default function NewSessionScreen() {
     router.replace(`/session/${session.id}`);
   };
 
-  const steps = [
-    // Step 0: Game Selection
-    <View key="0" style={{ width: SCREEN_WIDTH }}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.stepContent,
-          { paddingBottom: 120 },
-        ]}
-      >
-        {GAMES.map((game) => (
-          <GameCard
-            key={game.id}
-            game={game}
-            selected={selectedGame?.id === game.id}
-            onPress={() => handleSelectGame(game)}
-          />
-        ))}
-      </ScrollView>
-    </View>,
-
-    // Step 1: Players
-    <View key="1" style={{ width: SCREEN_WIDTH }}>
-      <KeyboardAwareScrollViewCompat
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
-        keyboardShouldPersistTaps="handled"
-      >
-        {players.map((name, i) => (
-          <View key={i} style={styles.playerInputRow}>
-            <TouchableOpacity
-              onPress={() => removePlayer(i)}
-              style={[
-                styles.removeBtn,
-                {
-                  backgroundColor: `${colors.red}22`,
-                  opacity: players.length <= (selectedGame?.minPlayers ?? 2) ? 0.3 : 1,
-                },
-              ]}
-            >
-              <Feather name="minus" size={16} color={colors.red} />
-            </TouchableOpacity>
-            <TextInput
-              style={[
-                styles.playerInput,
-                {
-                  backgroundColor: colors.surface,
-                  color: colors.text,
-                  borderColor: name.trim() ? colors.gold : colors.border,
-                  fontFamily: Fonts.heading,
-                },
-              ]}
-              value={name}
-              onChangeText={(v) => {
-                const next = [...players];
-                next[i] = v;
-                setPlayers(next);
-              }}
-              placeholder={`لاعب ${i + 1}`}
-              placeholderTextColor={colors.textDim}
-              textAlign="right"
-              returnKeyType="next"
-            />
-            <View
-              style={[
-                styles.playerNum,
-                { backgroundColor: colors.surfaceRaised },
-              ]}
-            >
-              <Text
-                style={[styles.playerNumText, { color: colors.textMuted, fontFamily: Fonts.mono }]}
-              >
-                {i + 1}
-              </Text>
-            </View>
-          </View>
-        ))}
-
-        {selectedGame && players.length < selectedGame.maxPlayers && (
-          <TouchableOpacity
-            onPress={addPlayer}
-            style={[
-              styles.addPlayerBtn,
-              { borderColor: colors.borderStrong },
-            ]}
-          >
-            <Feather name="user-plus" size={18} color={colors.textMuted} />
-            <Text style={[styles.addPlayerText, { color: colors.textMuted }]}>
-              أضف لاعب
-            </Text>
-          </TouchableOpacity>
-        )}
-      </KeyboardAwareScrollViewCompat>
-    </View>,
-
-    // Step 2: Settings
-    <View key="2" style={{ width: SCREEN_WIDTH }}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
-      >
-        {selectedGame && (
-          <View
-            style={[styles.gameSummary, { backgroundColor: colors.surface }]}
-          >
-            <Text style={[styles.gameSummaryTitle, { color: colors.gold }]}>
-              {selectedGame.name}
-            </Text>
-            <Text style={[styles.gameSummaryPlayers, { color: colors.textMuted }]}>
-              {players.filter((p) => p.trim()).length} لاعبين —{" "}
-              {selectedGame.isTeam ? "فريقين" : "فردي"}
-            </Text>
-          </View>
-        )}
-
-        <View style={styles.settingBlock}>
-          <Text style={[styles.settingLabel, { color: colors.text }]}>
-            نقاط الفوز
-          </Text>
-          <Text style={[styles.settingDesc, { color: colors.textMuted }]}>
-            أول لاعب يوصل هذا الرقم يفوز
-          </Text>
-          <View style={styles.targetRow}>
-            {[
-              selectedGame?.defaultTarget ?? 41,
-              (selectedGame?.defaultTarget ?? 41) + 10,
-              (selectedGame?.defaultTarget ?? 41) + 20,
-            ].map((val) => (
-              <TouchableOpacity
-                key={val}
-                onPress={() => {
-                  setTargetScore(val);
-                  Haptics.selectionAsync();
-                }}
-                style={[
-                  styles.targetBtn,
-                  {
-                    backgroundColor:
-                      targetScore === val
-                        ? colors.gold
-                        : colors.surface,
-                    borderColor:
-                      targetScore === val
-                        ? colors.gold
-                        : colors.border,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.targetBtnText,
-                    {
-                      color:
-                        targetScore === val
-                          ? colors.background
-                          : colors.textMuted,
-                      fontFamily: Fonts.mono,
-                    },
-                  ]}
-                >
-                  {val}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </ScrollView>
-    </View>,
-  ];
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View
         style={[
           styles.header,
-          {
-            paddingTop: insets.top + webTop + 8,
-            backgroundColor: colors.background,
-          },
+          { paddingTop: insets.top + webTop + 8 },
         ]}
       >
         <TouchableOpacity
-          onPress={() => {
-            if (step === 0) router.back();
-            else goTo(step - 1);
-          }}
+          onPress={handleBack}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <Feather name="arrow-right" size={24} color={colors.text} />
@@ -300,8 +126,7 @@ export default function NewSessionScreen() {
                 style={[
                   styles.stepDot,
                   {
-                    backgroundColor:
-                      i <= step ? colors.gold : colors.textDim,
+                    backgroundColor: i <= step ? colors.gold : colors.textDim,
                     width: i === step ? 20 : 8,
                   },
                 ]}
@@ -312,16 +137,209 @@ export default function NewSessionScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <FlatList
-        ref={flatRef}
-        data={steps}
-        horizontal
-        pagingEnabled
-        scrollEnabled={false}
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={(_, i) => String(i)}
-        renderItem={({ item }) => item}
-      />
+      <View style={{ flex: 1 }}>
+        {step === 0 && (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
+          >
+            {GAMES.map((game) => (
+              <GameCard
+                key={game.id}
+                game={game}
+                selected={selectedGame?.id === game.id}
+                onPress={() => handleSelectGame(game)}
+              />
+            ))}
+          </ScrollView>
+        )}
+
+        {step === 1 && (
+          <KeyboardAwareScrollViewCompat
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
+            keyboardShouldPersistTaps="handled"
+          >
+            {players.map((name, i) => (
+              <View key={i} style={styles.playerInputRow}>
+                <TouchableOpacity
+                  onPress={() => removePlayer(i)}
+                  style={[
+                    styles.removeBtn,
+                    {
+                      backgroundColor: `${colors.red}22`,
+                      opacity:
+                        players.length <= (selectedGame?.minPlayers ?? 2)
+                          ? 0.3
+                          : 1,
+                    },
+                  ]}
+                >
+                  <Feather name="minus" size={16} color={colors.red} />
+                </TouchableOpacity>
+                <TextInput
+                  style={[
+                    styles.playerInput,
+                    {
+                      backgroundColor: colors.surface,
+                      color: colors.text,
+                      borderColor: name.trim() ? colors.gold : colors.border,
+                      fontFamily: Fonts.heading,
+                    },
+                  ]}
+                  value={name}
+                  onChangeText={(v) => {
+                    const next = [...players];
+                    next[i] = v;
+                    setPlayers(next);
+                  }}
+                  placeholder={`لاعب ${i + 1}`}
+                  placeholderTextColor={colors.textDim}
+                  textAlign="right"
+                  returnKeyType="next"
+                />
+                <View
+                  style={[
+                    styles.playerNum,
+                    { backgroundColor: colors.surfaceRaised },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.playerNumText,
+                      { color: colors.textMuted, fontFamily: Fonts.mono },
+                    ]}
+                  >
+                    {i + 1}
+                  </Text>
+                </View>
+              </View>
+            ))}
+
+            {selectedGame && players.length < selectedGame.maxPlayers && (
+              <TouchableOpacity
+                onPress={addPlayer}
+                style={[
+                  styles.addPlayerBtn,
+                  { borderColor: colors.borderStrong },
+                ]}
+              >
+                <Feather name="user-plus" size={18} color={colors.textMuted} />
+                <Text
+                  style={[styles.addPlayerText, { color: colors.textMuted }]}
+                >
+                  أضف لاعب
+                </Text>
+              </TouchableOpacity>
+            )}
+          </KeyboardAwareScrollViewCompat>
+        )}
+
+        {step === 2 && (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
+          >
+            {selectedGame && (
+              <View
+                style={[
+                  styles.gameSummary,
+                  { backgroundColor: colors.surface },
+                ]}
+              >
+                <Text
+                  style={[styles.gameSummaryTitle, { color: colors.gold }]}
+                >
+                  {selectedGame.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.gameSummaryPlayers,
+                    { color: colors.textMuted },
+                  ]}
+                >
+                  {players.filter((p) => p.trim()).length > 0
+                    ? players.filter((p) => p.trim()).length
+                    : selectedGame.minPlayers}{" "}
+                  لاعبين — {selectedGame.isTeam ? "فريقين" : "فردي"}
+                </Text>
+                <View style={styles.playerChips}>
+                  {players
+                    .filter((p) => p.trim())
+                    .map((name, i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.chip,
+                          { backgroundColor: colors.surfaceRaised },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            { color: colors.textMuted },
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.settingBlock}>
+              <Text style={[styles.settingLabel, { color: colors.text }]}>
+                نقاط الفوز
+              </Text>
+              <Text style={[styles.settingDesc, { color: colors.textMuted }]}>
+                أول لاعب يوصل هذا الرقم يفوز
+              </Text>
+              <View style={styles.targetRow}>
+                {[
+                  selectedGame?.defaultTarget ?? 41,
+                  (selectedGame?.defaultTarget ?? 41) + 10,
+                  (selectedGame?.defaultTarget ?? 41) + 20,
+                ].map((val) => (
+                  <TouchableOpacity
+                    key={val}
+                    onPress={() => {
+                      setTargetScore(val);
+                      Haptics.selectionAsync();
+                    }}
+                    style={[
+                      styles.targetBtn,
+                      {
+                        backgroundColor:
+                          targetScore === val
+                            ? colors.gold
+                            : colors.surface,
+                        borderColor:
+                          targetScore === val ? colors.gold : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.targetBtnText,
+                        {
+                          color:
+                            targetScore === val
+                              ? colors.background
+                              : colors.textMuted,
+                          fontFamily: Fonts.mono,
+                        },
+                      ]}
+                    >
+                      {val}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          </ScrollView>
+        )}
+      </View>
 
       <View
         style={[
@@ -335,17 +353,23 @@ export default function NewSessionScreen() {
       >
         {step < 2 ? (
           <TouchableOpacity
-            onPress={() => canNext() && goTo(step + 1)}
+            onPress={handleNext}
+            disabled={!canNext()}
             style={[
               styles.nextBtn,
-              { backgroundColor: canNext() ? colors.gold : colors.surfaceRaised },
+              {
+                backgroundColor: canNext()
+                  ? colors.gold
+                  : colors.surfaceRaised,
+              },
             ]}
-            disabled={!canNext()}
           >
             <Text
               style={[
                 styles.nextBtnText,
-                { color: canNext() ? colors.background : colors.textDim },
+                {
+                  color: canNext() ? colors.background : colors.textDim,
+                },
               ]}
             >
               التالي
@@ -453,7 +477,7 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: "center",
     marginBottom: 24,
-    gap: 4,
+    gap: 8,
   },
   gameSummaryTitle: {
     fontFamily: Fonts.heading,
@@ -464,6 +488,22 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: 14,
     textAlign: "center",
+  },
+  playerChips: {
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    gap: 6,
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  chipText: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
   },
   settingBlock: {
     gap: 10,
