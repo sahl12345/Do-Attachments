@@ -1,0 +1,14 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "2c1GJYZLsBCpDPK8DQRHG"
+uri = "file://attached_assets/generated_images/dark_night_deep_navy_4184.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "y-47iDa-17GOtFKZdldRv"
+uri = "file://attached_assets/generated_images/pure_dark_0d0d1a_background_43bc.png"
+type = "image"
+title = "generated_image"
