@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -26,21 +26,119 @@ import {
   getTotalScore,
   useApp,
 } from "@/contexts/AppContext";
+import {
+  OnlineSessionData,
+  addOnlineRound,
+  completeOnlineSession,
+  getOnlineSession,
+  startOnlineSession,
+  undoOnlineRound,
+} from "@/services/onlineSession";
 import { useColors } from "@/hooks/useColors";
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function getOnlineTotalScore(session: OnlineSessionData, playerId: string) {
+  return session.rounds.reduce((s, r) => s + (r.scores[playerId] ?? 0), 0);
+}
+
+function checkOnlineWinner(session: OnlineSessionData): string | null {
+  const game = getGameById(session.gameId);
+  if (!game || game.defaultTarget === 0) return null;
+  if (game.lowerIsBetter) {
+    const elim = session.players.find(
+      (p) =>
+        getOnlineTotalScore(session, p.id) >=
+        (game.eliminationScore ?? game.defaultTarget)
+    );
+    return elim?.id ?? null;
+  }
+  const winner = session.players.find(
+    (p) => getOnlineTotalScore(session, p.id) >= session.targetScore
+  );
+  return winner?.id ?? null;
+}
+
+// ─── Code display boxes ──────────────────────────────────────────────────────
+function CodeDisplay({ code, colors }: { code: string; colors: any }) {
+  return (
+    <View style={codeStyles.row}>
+      {code.split("").map((d, i) => (
+        <View
+          key={i}
+          style={[codeStyles.box, { backgroundColor: colors.surfaceRaised, borderColor: colors.gold }]}
+        >
+          <Text style={[codeStyles.digit, { color: colors.gold }]}>{d}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const codeStyles = StyleSheet.create({
+  row: { flexDirection: "row", gap: 8, justifyContent: "center" },
+  box: {
+    width: 46,
+    height: 58,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  digit: { fontFamily: "IBMPlexMono_400Regular", fontSize: 26 },
+});
+
+// ─── Main screen ─────────────────────────────────────────────────────────────
 export default function SessionScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, hostKey, playerId } = useLocalSearchParams<{
+    id: string;
+    hostKey?: string;
+    playerId?: string;
+  }>();
   const { sessions, updateSession } = useApp();
+
+  const isOnline = !!(hostKey || playerId);
+  const isHost = !!hostKey;
+  const code = isOnline ? id : undefined;
+
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [showWinner, setShowWinner] = useState(false);
+  const [onlineSession, setOnlineSession] = useState<OnlineSessionData | null>(null);
+  const [startingOnline, setStartingOnline] = useState(false);
   const winnerAnim = useRef(new Animated.Value(0)).current;
   const webTop = Platform.OS === "web" ? 67 : 0;
 
-  const session = sessions.find((s) => s.id === id);
-  const game = session ? getGameById(session.gameId) : null;
+  // ── local session ──────────────────────────────────────────────────────────
+  const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
+  const localGame = localSession ? getGameById(localSession.gameId) : null;
+
+  // ── online polling ─────────────────────────────────────────────────────────
+  const syncOnline = useCallback(async () => {
+    if (!code) return;
+    try {
+      const data = await getOnlineSession(code);
+      setOnlineSession((prev) => {
+        if (
+          !prev?.completedAt &&
+          data.completedAt &&
+          data.winnerId
+        ) {
+          setTimeout(() => setShowWinner(true), 300);
+        }
+        return data;
+      });
+    } catch (_e) {}
+  }, [code]);
+
+  useEffect(() => {
+    if (!isOnline) return;
+    syncOnline();
+    const interval = setInterval(syncOnline, 2000);
+    return () => clearInterval(interval);
+  }, [isOnline, syncOnline]);
 
   useEffect(() => {
     if (showWinner) {
@@ -54,61 +152,50 @@ export default function SessionScreen() {
     }
   }, [showWinner, winnerAnim]);
 
+  // ── LOCAL GAME LOGIC ───────────────────────────────────────────────────────
   const playerScores = useMemo(() => {
-    if (!session) return [];
-    return session.players.map((p) => {
-      const total = getTotalScore(session, p.id);
-      const lastRound = session.rounds[session.rounds.length - 1];
-      const lastDelta = lastRound ? (lastRound.scores[p.id] ?? 0) : undefined;
-      return { player: p, total, lastDelta };
-    });
-  }, [session]);
+    if (!localSession) return [];
+    return localSession.players.map((p) => ({
+      player: p,
+      total: getTotalScore(localSession, p.id),
+      lastDelta: localSession.rounds.length > 0
+        ? (localSession.rounds[localSession.rounds.length - 1].scores[p.id] ?? 0)
+        : undefined,
+    }));
+  }, [localSession]);
 
-  const getWinnerId = (s: Session): string | null => {
-    if (!game || game.defaultTarget === 0) return null;
-    if (game.lowerIsBetter) {
+  const getLocalWinnerId = (s: Session): string | null => {
+    if (!localGame || localGame.defaultTarget === 0) return null;
+    if (localGame.lowerIsBetter) {
       const elim = s.players.find(
-        (p) => getTotalScore(s, p.id) >= (game.eliminationScore ?? game.defaultTarget)
+        (p) => getTotalScore(s, p.id) >= (localGame.eliminationScore ?? localGame.defaultTarget)
       );
-      if (elim) return elim.id;
-    } else {
-      const winner = s.players.find(
-        (p) => getTotalScore(s, p.id) >= game.defaultTarget
-      );
-      if (winner) return winner.id;
+      return elim?.id ?? null;
     }
-    return null;
+    const winner = s.players.find(
+      (p) => getTotalScore(s, p.id) >= localGame.defaultTarget
+    );
+    return winner?.id ?? null;
   };
 
-  const handleAddRound = (scores: Record<string, number>) => {
-    if (!session) return;
+  const handleAddLocalRound = (scores: Record<string, number>) => {
+    if (!localSession) return;
     setShowScoreModal(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    const round: Round = {
-      id: generateId(),
-      scores,
-      timestamp: Date.now(),
-    };
-
-    const updatedRounds = [...session.rounds, round];
-    const updatedSession: Session = { ...session, rounds: updatedRounds };
-
-    const winnerId = getWinnerId(updatedSession);
+    const round: Round = { id: generateId(), scores, timestamp: Date.now() };
+    const updatedRounds = [...localSession.rounds, round];
+    const updatedSession: Session = { ...localSession, rounds: updatedRounds };
+    const winnerId = getLocalWinnerId(updatedSession);
     if (winnerId) {
-      updateSession(session.id, {
-        ...updatedSession,
-        winnerId,
-        completedAt: Date.now(),
-      });
+      updateSession(localSession.id, { ...updatedSession, winnerId, completedAt: Date.now() });
       setTimeout(() => setShowWinner(true), 300);
     } else {
-      updateSession(session.id, updatedSession);
+      updateSession(localSession.id, updatedSession);
     }
   };
 
-  const handleUndoRound = () => {
-    if (!session || session.rounds.length === 0) return;
+  const handleUndoLocal = () => {
+    if (!localSession || localSession.rounds.length === 0) return;
     Alert.alert("تراجع عن الجولة الأخيرة", "هل تريد حذف الجولة الأخيرة؟", [
       { text: "إلغاء", style: "cancel" },
       {
@@ -116,9 +203,8 @@ export default function SessionScreen() {
         style: "destructive",
         onPress: () => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          const newRounds = session.rounds.slice(0, -1);
-          updateSession(session.id, {
-            rounds: newRounds,
+          updateSession(localSession.id, {
+            rounds: localSession.rounds.slice(0, -1),
             completedAt: undefined,
             winnerId: undefined,
           });
@@ -128,11 +214,63 @@ export default function SessionScreen() {
     ]);
   };
 
-  if (!session || !game) {
+  // ── ONLINE GAME LOGIC ──────────────────────────────────────────────────────
+  const handleStartOnline = async () => {
+    if (!code || !hostKey) return;
+    setStartingOnline(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const data = await startOnlineSession(code, hostKey);
+      setOnlineSession(data);
+    } catch (_e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setStartingOnline(false);
+    }
+  };
+
+  const handleAddOnlineRound = async (scores: Record<string, number>) => {
+    if (!code || !hostKey || !onlineSession) return;
+    setShowScoreModal(false);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const data = await addOnlineRound(code, hostKey, scores);
+      const winnerId = checkOnlineWinner(data);
+      if (winnerId) {
+        const completed = await completeOnlineSession(code, hostKey, winnerId);
+        setOnlineSession(completed);
+        setTimeout(() => setShowWinner(true), 300);
+      } else {
+        setOnlineSession(data);
+      }
+    } catch (_e) {}
+  };
+
+  const handleUndoOnline = () => {
+    if (!code || !hostKey || !onlineSession || onlineSession.rounds.length === 0) return;
+    Alert.alert("تراجع عن الجولة الأخيرة", "هل تريد حذف الجولة الأخيرة؟", [
+      { text: "إلغاء", style: "cancel" },
+      {
+        text: "تراجع",
+        style: "destructive",
+        onPress: async () => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          try {
+            const data = await undoOnlineRound(code, hostKey);
+            setOnlineSession(data);
+            setShowWinner(false);
+          } catch (_e) {}
+        },
+      },
+    ]);
+  };
+
+  // ── RENDER ─────────────────────────────────────────────────────────────────
+
+  // Error: session not found
+  if (!isOnline && !localSession) {
     return (
-      <View
-        style={[styles.center, { backgroundColor: colors.background }]}
-      >
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Text style={[styles.errorText, { color: colors.textMuted }]}>
           ما لقينا الجلسة
         </Text>
@@ -146,25 +284,197 @@ export default function SessionScreen() {
     );
   }
 
-  const winnerPlayer = session.winnerId
-    ? session.players.find((p) => p.id === session.winnerId)
+  // ── ONLINE: LOBBY / WAITING ─────────────────────────────────────────────
+  if (isOnline && (!onlineSession?.startedAt)) {
+    const sessionCode = code ?? "";
+    const players = onlineSession?.players ?? [];
+    const gameName = onlineSession ? getGameById(onlineSession.gameId)?.name : "...";
+    const myPlayer = players.find((p) => p.id === playerId);
+    const canStart = isHost && players.length >= 2;
+
+    return (
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: colors.background },
+        ]}
+      >
+        <View style={[styles.header, { paddingTop: insets.top + webTop + 8 }]}>
+          <View style={{ width: 24 }} />
+          <Text style={[styles.gameName, { color: colors.gold }]}>
+            {gameName ?? "جلسة مشتركة"}
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Feather name="arrow-right" size={24} color={colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={[
+            styles.lobbyContent,
+            {
+              paddingBottom: insets.bottom + 120 + (Platform.OS === "web" ? 34 : 0),
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {isHost ? (
+            <>
+              <Text style={[styles.lobbyTitle, { color: colors.text }]}>
+                شارك الكود مع أصحابك
+              </Text>
+              <CodeDisplay code={sessionCode} colors={colors} />
+              <Text style={[styles.lobbyHint, { color: colors.textMuted }]}>
+                الكل يضغط "انضم بكود" من الرئيسية ويدخل الأرقام هذه
+              </Text>
+            </>
+          ) : (
+            <View
+              style={[
+                styles.waitingBox,
+                { backgroundColor: colors.surface },
+              ]}
+            >
+              <Feather name="loader" size={28} color={colors.gold} />
+              <Text style={[styles.waitingText, { color: colors.text }]}>
+                انتظر ريثما يبدأ المضيف...
+              </Text>
+              {myPlayer && (
+                <Text style={[styles.waitingName, { color: colors.textMuted }]}>
+                  أنت: {myPlayer.name}
+                </Text>
+              )}
+            </View>
+          )}
+
+          <View style={[styles.playersBox, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.playersBoxTitle, { color: colors.textMuted }]}>
+              اللاعبون ({players.length})
+            </Text>
+            {players.length === 0 ? (
+              <Text style={[styles.noPlayersText, { color: colors.textDim }]}>
+                انتظر اتصال اللاعبين...
+              </Text>
+            ) : (
+              players.map((p) => (
+                <View key={p.id} style={styles.playerRow}>
+                  <View style={styles.playerRowLeft}>
+                    {p.isHost && (
+                      <View
+                        style={[
+                          styles.hostBadge,
+                          { backgroundColor: `${colors.gold}33` },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.hostBadgeText, { color: colors.gold }]}
+                        >
+                          مضيف
+                        </Text>
+                      </View>
+                    )}
+                    {p.id === playerId && (
+                      <Feather name="user" size={14} color={colors.textDim} />
+                    )}
+                  </View>
+                  <Text style={[styles.playerRowName, { color: colors.text }]}>
+                    {p.name}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        </ScrollView>
+
+        {isHost && (
+          <View
+            style={[
+              styles.footer,
+              {
+                paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8),
+                backgroundColor: colors.background,
+                borderTopColor: colors.border,
+              },
+            ]}
+          >
+            <TouchableOpacity
+              onPress={handleStartOnline}
+              disabled={!canStart || startingOnline}
+              style={[
+                styles.startBtn,
+                {
+                  backgroundColor: canStart ? colors.gold : colors.surfaceRaised,
+                },
+              ]}
+            >
+              <Feather
+                name="play"
+                size={20}
+                color={canStart ? colors.background : colors.textDim}
+              />
+              <Text
+                style={[
+                  styles.startBtnText,
+                  { color: canStart ? colors.background : colors.textDim },
+                ]}
+              >
+                {players.length < 2
+                  ? "انتظر لاعبين (٢ على الأقل)"
+                  : "ابدأ الجلسة"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  // ── SESSION PLAYING (local or online started) ─────────────────────────────
+
+  const session = isOnline ? onlineSession : localSession;
+  const game = session ? getGameById(session.gameId) : null;
+  const sessionPlayers = session?.players ?? [];
+  const sessionRounds = session?.rounds ?? [];
+  const sessionWinnerId = session?.completedAt ? session.winnerId : undefined;
+
+  const scoredPlayers = sessionPlayers.map((p) => {
+    const total = isOnline
+      ? getOnlineTotalScore(onlineSession!, p.id)
+      : getTotalScore(localSession!, p.id);
+    const lastRound = sessionRounds[sessionRounds.length - 1];
+    const lastDelta = lastRound ? (lastRound.scores[p.id] ?? 0) : undefined;
+    return { player: p, total, lastDelta };
+  });
+
+  const winnerPlayer = sessionWinnerId
+    ? sessionPlayers.find((p) => p.id === sessionWinnerId)
     : null;
 
-  const isFourPlayer = session.players.length === 4;
-  const isTwoPlayer = session.players.length === 2;
+  const canAddRound = isOnline ? isHost : true;
+  const isComplete = !!(session?.completedAt);
+  const isFourPlayer = sessionPlayers.length === 4;
+  const isTwoPlayer = sessionPlayers.length === 2;
+
+  const handleAddRound = (scores: Record<string, number>) => {
+    if (isOnline) handleAddOnlineRound(scores);
+    else handleAddLocalRound(scores);
+  };
+
+  const handleUndo = () => {
+    if (isOnline) handleUndoOnline();
+    else handleUndoLocal();
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + webTop + 8 },
-        ]}
-      >
+      <View style={[styles.header, { paddingTop: insets.top + webTop + 8 }]}>
         <View style={styles.headerActions}>
-          {session.rounds.length > 0 && !session.completedAt && (
+          {sessionRounds.length > 0 && !isComplete && canAddRound && (
             <TouchableOpacity
-              onPress={handleUndoRound}
+              onPress={handleUndo}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             >
               <Feather name="rotate-ccw" size={20} color={colors.textMuted} />
@@ -174,13 +484,26 @@ export default function SessionScreen() {
 
         <View style={styles.headerCenter}>
           <Text style={[styles.gameName, { color: colors.gold }]}>
-            {game.name}
+            {game?.name ?? "جلسة"}
           </Text>
-          <Text style={[styles.roundLabel, { color: colors.textMuted }]}>
-            {session.completedAt
-              ? "انتهت"
-              : `جولة ${session.rounds.length + 1}`}
-          </Text>
+          <View style={styles.headerMeta}>
+            {isOnline && (
+              <View
+                style={[
+                  styles.onlineBadge,
+                  { backgroundColor: `${colors.gold}22` },
+                ]}
+              >
+                <Feather name="wifi" size={11} color={colors.gold} />
+                <Text style={[styles.onlineBadgeText, { color: colors.gold }]}>
+                  {code}
+                </Text>
+              </View>
+            )}
+            <Text style={[styles.roundLabel, { color: colors.textMuted }]}>
+              {isComplete ? "انتهت" : `جولة ${sessionRounds.length + 1}`}
+            </Text>
+          </View>
         </View>
 
         <TouchableOpacity
@@ -191,19 +514,12 @@ export default function SessionScreen() {
         </TouchableOpacity>
       </View>
 
-      {game.defaultTarget > 0 && (
-        <View
-          style={[
-            styles.targetBar,
-            { backgroundColor: colors.surface },
-          ]}
-        >
+      {game && game.defaultTarget > 0 && (
+        <View style={[styles.targetBar, { backgroundColor: colors.surface }]}>
           <Text style={[styles.targetText, { color: colors.textMuted }]}>
             الهدف:{" "}
-            <Text
-              style={{ color: colors.gold, fontFamily: Fonts.mono }}
-            >
-              {session.targetScore}
+            <Text style={{ color: colors.gold, fontFamily: Fonts.mono }}>
+              {session?.targetScore ?? game.defaultTarget}
             </Text>
           </Text>
           <Text style={[styles.targetText, { color: colors.textMuted }]}>
@@ -212,11 +528,26 @@ export default function SessionScreen() {
         </View>
       )}
 
+      {isOnline && !isHost && !isComplete && (
+        <View
+          style={[
+            styles.watcherBanner,
+            { backgroundColor: `${colors.gold}15`, borderColor: `${colors.gold}30` },
+          ]}
+        >
+          <Feather name="eye" size={14} color={colors.gold} />
+          <Text style={[styles.watcherText, { color: colors.gold }]}>
+            أنت مشاهد — فقط المضيف يقدر يضيف جولات
+          </Text>
+        </View>
+      )}
+
       <ScrollView
         contentContainerStyle={[
           styles.scoresContainer,
           {
-            paddingBottom: insets.bottom + 120 + (Platform.OS === "web" ? 34 : 0),
+            paddingBottom:
+              insets.bottom + 120 + (Platform.OS === "web" ? 34 : 0),
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -224,51 +555,47 @@ export default function SessionScreen() {
         {isFourPlayer ? (
           <>
             <View style={styles.scoreRow}>
-              {[playerScores[0], playerScores[1]].map((ps) =>
-                ps ? (
-                  <PlayerScoreCard
-                    key={ps.player.id}
-                    name={ps.player.name}
-                    score={ps.total}
-                    lastDelta={
-                      session.rounds.length > 0 ? ps.lastDelta : undefined
-                    }
-                    isWinner={session.winnerId === ps.player.id}
-                    teamLabel={game.isTeam ? "الفريق أ" : undefined}
-                  />
-                ) : null
+              {[scoredPlayers[0], scoredPlayers[1]].map(
+                (ps) =>
+                  ps && (
+                    <PlayerScoreCard
+                      key={ps.player.id}
+                      name={ps.player.name}
+                      score={ps.total}
+                      lastDelta={sessionRounds.length > 0 ? ps.lastDelta : undefined}
+                      isWinner={sessionWinnerId === ps.player.id}
+                      teamLabel={game?.isTeam ? "الفريق أ" : undefined}
+                    />
+                  )
               )}
             </View>
             <View style={styles.scoreRow}>
-              {[playerScores[2], playerScores[3]].map((ps) =>
-                ps ? (
-                  <PlayerScoreCard
-                    key={ps.player.id}
-                    name={ps.player.name}
-                    score={ps.total}
-                    lastDelta={
-                      session.rounds.length > 0 ? ps.lastDelta : undefined
-                    }
-                    isWinner={session.winnerId === ps.player.id}
-                    teamLabel={game.isTeam ? "الفريق ب" : undefined}
-                  />
-                ) : null
+              {[scoredPlayers[2], scoredPlayers[3]].map(
+                (ps) =>
+                  ps && (
+                    <PlayerScoreCard
+                      key={ps.player.id}
+                      name={ps.player.name}
+                      score={ps.total}
+                      lastDelta={sessionRounds.length > 0 ? ps.lastDelta : undefined}
+                      isWinner={sessionWinnerId === ps.player.id}
+                      teamLabel={game?.isTeam ? "الفريق ب" : undefined}
+                    />
+                  )
               )}
             </View>
           </>
         ) : (
           <View style={isTwoPlayer ? styles.scoreRow : styles.scoreCol}>
-            {playerScores.map((ps) => (
+            {scoredPlayers.map((ps) => (
               <PlayerScoreCard
                 key={ps.player.id}
                 name={ps.player.name}
                 score={ps.total}
-                lastDelta={
-                  session.rounds.length > 0 ? ps.lastDelta : undefined
-                }
-                isWinner={session.winnerId === ps.player.id}
+                lastDelta={sessionRounds.length > 0 ? ps.lastDelta : undefined}
+                isWinner={sessionWinnerId === ps.player.id}
                 isEliminated={
-                  game.eliminationScore
+                  game?.eliminationScore
                     ? ps.total >= game.eliminationScore
                     : false
                 }
@@ -277,32 +604,26 @@ export default function SessionScreen() {
           </View>
         )}
 
-        {session.rounds.length > 0 && (
+        {sessionRounds.length > 0 && (
           <View style={styles.roundsSection}>
             <Text style={[styles.roundsTitle, { color: colors.textMuted }]}>
               سجل الجولات
             </Text>
-            {[...session.rounds].reverse().map((round, i) => (
+            {[...sessionRounds].reverse().map((round, i) => (
               <View
                 key={round.id}
-                style={[
-                  styles.roundRow,
-                  { backgroundColor: colors.surface },
-                ]}
+                style={[styles.roundRow, { backgroundColor: colors.surface }]}
               >
                 <Text
                   style={[
                     styles.roundNum,
-                    {
-                      color: colors.textDim,
-                      fontFamily: Fonts.mono,
-                    },
+                    { color: colors.textDim, fontFamily: Fonts.mono },
                   ]}
                 >
-                  #{session.rounds.length - i}
+                  #{sessionRounds.length - i}
                 </Text>
                 <View style={styles.roundScores}>
-                  {session.players.map((p) => (
+                  {sessionPlayers.map((p) => (
                     <View key={p.id} style={styles.roundScoreItem}>
                       <Text
                         style={[
@@ -338,7 +659,7 @@ export default function SessionScreen() {
         )}
       </ScrollView>
 
-      {!session.completedAt && (
+      {!isComplete && canAddRound && (
         <View
           style={[
             styles.footer,
@@ -366,8 +687,8 @@ export default function SessionScreen() {
 
       <ScoreEntryModal
         visible={showScoreModal}
-        players={session.players}
-        roundNumber={session.rounds.length + 1}
+        players={sessionPlayers as { id: string; name: string }[]}
+        roundNumber={sessionRounds.length + 1}
         onClose={() => setShowScoreModal(false)}
         onSubmit={handleAddRound}
       />
@@ -397,14 +718,12 @@ export default function SessionScreen() {
               },
             ]}
           >
-            <Text style={[styles.winnerCrown, { color: colors.gold }]}>
-              ★
-            </Text>
+            <Text style={[styles.winnerCrown, { color: colors.gold }]}>★</Text>
             <Text style={[styles.winnerTitle, { color: colors.gold }]}>
               {winnerPlayer?.name ?? "الفائز"}
             </Text>
             <Text style={[styles.winnerSub, { color: colors.textMuted }]}>
-              فاز بعد {session.rounds.length} جولة
+              فاز بعد {sessionRounds.length} جولة
             </Text>
             <TouchableOpacity
               onPress={() => {
@@ -432,20 +751,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 16,
   },
-  errorText: {
-    fontFamily: "Tajawal_400Regular",
-    fontSize: 18,
-    textAlign: "center",
-  },
-  backBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  backBtnText: {
-    fontFamily: "Cairo_700Bold",
-    fontSize: 16,
-  },
+  errorText: { fontFamily: "Tajawal_400Regular", fontSize: 18, textAlign: "center" },
+  backBtn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
+  backBtnText: { fontFamily: "Cairo_700Bold", fontSize: 16 },
   header: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -453,22 +761,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerCenter: {
+  headerCenter: { alignItems: "center", gap: 4 },
+  headerActions: { width: 44, alignItems: "flex-start" },
+  headerMeta: { flexDirection: "row-reverse", alignItems: "center", gap: 6 },
+  gameName: { fontFamily: Fonts.heading, fontSize: 20 },
+  roundLabel: { fontFamily: Fonts.body, fontSize: 13 },
+  onlineBadge: {
+    flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
-  headerActions: {
-    width: 44,
-    alignItems: "flex-start",
-  },
-  gameName: {
-    fontFamily: Fonts.heading,
-    fontSize: 20,
-  },
-  roundLabel: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-  },
+  onlineBadgeText: { fontFamily: Fonts.mono, fontSize: 12 },
   targetBar: {
     flexDirection: "row-reverse",
     justifyContent: "space-between",
@@ -478,32 +784,63 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 8,
   },
-  targetText: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-  },
-  scoresContainer: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-  },
-  scoreRow: {
-    flexDirection: "row",
-    gap: 0,
-    marginBottom: 0,
-  },
-  scoreCol: {
-    gap: 0,
-  },
-  roundsSection: {
-    marginTop: 20,
+  targetText: { fontFamily: Fonts.body, fontSize: 13 },
+  watcherBanner: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
     gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 8,
   },
-  roundsTitle: {
+  watcherText: { fontFamily: Fonts.body, fontSize: 12, textAlign: "right" },
+  // LOBBY
+  lobbyContent: { paddingHorizontal: 24, paddingTop: 16, gap: 20 },
+  lobbyTitle: { fontFamily: Fonts.heading, fontSize: 22, textAlign: "center" },
+  lobbyHint: {
     fontFamily: Fonts.body,
-    fontSize: 13,
-    textAlign: "right",
-    marginBottom: 4,
+    fontSize: 14,
+    textAlign: "center",
+    lineHeight: 22,
   },
+  waitingBox: {
+    borderRadius: 20,
+    padding: 28,
+    alignItems: "center",
+    gap: 12,
+  },
+  waitingText: { fontFamily: Fonts.heading, fontSize: 18, textAlign: "center" },
+  waitingName: { fontFamily: Fonts.body, fontSize: 14, textAlign: "center" },
+  playersBox: { borderRadius: 16, padding: 16, gap: 10 },
+  playersBoxTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right" },
+  noPlayersText: { fontFamily: Fonts.body, fontSize: 14, textAlign: "center", paddingVertical: 8 },
+  playerRow: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  playerRowLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
+  playerRowName: { fontFamily: Fonts.body, fontSize: 15, textAlign: "right" },
+  hostBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  hostBadgeText: { fontFamily: Fonts.body, fontSize: 11 },
+  startBtn: {
+    flexDirection: "row-reverse",
+    height: 56,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  startBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
+  // GAME
+  scoresContainer: { paddingHorizontal: 12, paddingTop: 8 },
+  scoreRow: { flexDirection: "row" },
+  scoreCol: {},
+  roundsSection: { marginTop: 20, gap: 6 },
+  roundsTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right", marginBottom: 4 },
   roundRow: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -512,35 +849,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 12,
   },
-  roundNum: {
-    fontSize: 12,
-    width: 24,
-    textAlign: "center",
-  },
+  roundNum: { fontSize: 12, width: 24, textAlign: "center" },
   roundScores: {
     flex: 1,
     flexDirection: "row-reverse",
     gap: 12,
     flexWrap: "wrap",
   },
-  roundScoreItem: {
-    alignItems: "center",
-    gap: 2,
-  },
-  roundDelta: {
-    fontSize: 13,
-  },
-  roundPlayerName: {
-    fontFamily: "Tajawal_400Regular",
-    fontSize: 10,
-    maxWidth: 50,
-    textAlign: "center",
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-  },
+  roundScoreItem: { alignItems: "center", gap: 2 },
+  roundDelta: { fontSize: 13 },
+  roundPlayerName: { fontFamily: "Tajawal_400Regular", fontSize: 10, maxWidth: 50, textAlign: "center" },
+  footer: { paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1 },
   addRoundBtn: {
     flexDirection: "row-reverse",
     height: 56,
@@ -549,10 +868,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
   },
-  addRoundText: {
-    fontFamily: Fonts.heading,
-    fontSize: 18,
-  },
+  addRoundText: { fontFamily: Fonts.heading, fontSize: 18 },
   winnerOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",
@@ -569,28 +885,9 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 340,
   },
-  winnerCrown: {
-    fontSize: 56,
-    textAlign: "center",
-  },
-  winnerTitle: {
-    fontFamily: Fonts.heading,
-    fontSize: 32,
-    textAlign: "center",
-  },
-  winnerSub: {
-    fontFamily: Fonts.body,
-    fontSize: 16,
-    textAlign: "center",
-  },
-  winnerBtn: {
-    paddingHorizontal: 40,
-    paddingVertical: 14,
-    borderRadius: 14,
-    marginTop: 8,
-  },
-  winnerBtnText: {
-    fontFamily: Fonts.heading,
-    fontSize: 17,
-  },
+  winnerCrown: { fontSize: 56, textAlign: "center" },
+  winnerTitle: { fontFamily: Fonts.heading, fontSize: 32, textAlign: "center" },
+  winnerSub: { fontFamily: Fonts.body, fontSize: 16, textAlign: "center" },
+  winnerBtn: { paddingHorizontal: 40, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
+  winnerBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
 });

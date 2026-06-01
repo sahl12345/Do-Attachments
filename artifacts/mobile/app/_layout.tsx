@@ -24,7 +24,6 @@ import { AppProvider, useApp } from "@/contexts/AppContext";
 SplashScreen.preventAutoHideAsync();
 SystemUI.setBackgroundColorAsync("#0D0D1A");
 
-// Force RTL for Arabic layout
 I18nManager.forceRTL(true);
 I18nManager.allowRTL(true);
 
@@ -55,6 +54,14 @@ function RootLayoutNav() {
       <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       <Stack.Screen
         name="session/new"
+        options={{
+          headerShown: false,
+          presentation: "modal",
+          animation: "slide_from_bottom",
+        }}
+      />
+      <Stack.Screen
+        name="session/join"
         options={{
           headerShown: false,
           presentation: "modal",

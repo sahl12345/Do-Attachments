@@ -27,11 +27,6 @@ export default function HomeScreen() {
   const activeSessions = sessions.filter((s) => !s.completedAt);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
-  const handleNewSession = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    router.push("/session/new");
-  };
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -39,8 +34,7 @@ export default function HomeScreen() {
         styles.content,
         {
           paddingTop: insets.top + webTop + 16,
-          paddingBottom:
-            insets.bottom + 100 + (Platform.OS === "web" ? 34 : 0),
+          paddingBottom: insets.bottom + 100 + (Platform.OS === "web" ? 34 : 0),
         },
       ]}
       showsVerticalScrollIndicator={false}
@@ -50,35 +44,35 @@ export default function HomeScreen() {
           أهلاً
         </Text>
         <Text style={[styles.greetingName, { color: colors.text }]}>
-          {profile.name} 👋
+          {profile.name}
         </Text>
       </View>
 
       {activeSessions.length > 0 && (
-        <View
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push(`/session/${activeSessions[0].id}`)}
           style={[
             styles.activeBanner,
-            { backgroundColor: `${colors.gold}22`, borderColor: `${colors.gold}44` },
+            {
+              backgroundColor: `${colors.gold}18`,
+              borderColor: `${colors.gold}40`,
+            },
           ]}
         >
-          <View style={styles.activeBannerRow}>
-            <Feather name="zap" size={16} color={colors.gold} />
-            <Text style={[styles.activeBannerText, { color: colors.gold }]}>
-              عندك {activeSessions.length} جلسة جارية
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => router.push(`/session/${activeSessions[0].id}`)}
-          >
-            <Text style={[styles.activeBannerLink, { color: colors.gold }]}>
-              ارجعلها
-            </Text>
-          </TouchableOpacity>
-        </View>
+          <Feather name="chevron-left" size={18} color={colors.gold} />
+          <Text style={[styles.activeBannerText, { color: colors.gold }]}>
+            عندك {activeSessions.length} جلسة جارية — ارجعلها
+          </Text>
+          <Feather name="zap" size={16} color={colors.gold} />
+        </TouchableOpacity>
       )}
 
       <TouchableOpacity
-        onPress={handleNewSession}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          router.push("/session/new");
+        }}
         activeOpacity={0.85}
         style={[styles.primaryBtn, { backgroundColor: colors.gold }]}
       >
@@ -89,16 +83,17 @@ export default function HomeScreen() {
       </TouchableOpacity>
 
       <TouchableOpacity
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          router.push("/session/join");
+        }}
         activeOpacity={0.7}
         style={[
           styles.secondaryBtn,
-          {
-            backgroundColor: colors.surface,
-            borderColor: colors.borderStrong,
-          },
+          { backgroundColor: colors.surface, borderColor: colors.borderStrong },
         ]}
       >
-        <Feather name="users" size={20} color={colors.textMuted} />
+        <Feather name="hash" size={20} color={colors.textMuted} />
         <Text style={[styles.secondaryBtnText, { color: colors.textMuted }]}>
           انضم بكود
         </Text>
@@ -135,26 +130,11 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: 16,
-  },
-  greeting: {
-    alignItems: "flex-end",
-    marginBottom: 24,
-  },
-  greetingText: {
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    textAlign: "right",
-  },
-  greetingName: {
-    fontFamily: Fonts.heading,
-    fontSize: 26,
-    textAlign: "right",
-  },
+  container: { flex: 1 },
+  content: { paddingHorizontal: 16 },
+  greeting: { alignItems: "flex-end", marginBottom: 24 },
+  greetingText: { fontFamily: Fonts.body, fontSize: 14, textAlign: "right" },
+  greetingName: { fontFamily: Fonts.heading, fontSize: 26, textAlign: "right" },
   activeBanner: {
     borderRadius: 14,
     borderWidth: 1,
@@ -165,20 +145,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 16,
   },
-  activeBannerRow: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 8,
-  },
-  activeBannerText: {
-    fontFamily: Fonts.bodyBold,
-    fontSize: 14,
-  },
-  activeBannerLink: {
-    fontFamily: Fonts.heading,
-    fontSize: 14,
-    textDecorationLine: "underline",
-  },
+  activeBannerText: { fontFamily: Fonts.bodyBold, fontSize: 14, flex: 1, textAlign: "right", paddingHorizontal: 8 },
   primaryBtn: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -188,10 +155,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 12,
   },
-  primaryBtnText: {
-    fontFamily: Fonts.heading,
-    fontSize: 18,
-  },
+  primaryBtnText: { fontFamily: Fonts.heading, fontSize: 18 },
   secondaryBtn: {
     flexDirection: "row-reverse",
     alignItems: "center",
@@ -202,10 +166,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 32,
   },
-  secondaryBtnText: {
-    fontFamily: Fonts.heading,
-    fontSize: 17,
-  },
+  secondaryBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
   section: {},
   sectionTitle: {
     fontFamily: Fonts.heading,

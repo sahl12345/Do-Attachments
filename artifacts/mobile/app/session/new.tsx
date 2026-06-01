@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,29 +19,50 @@ import { GameCard } from "@/components/GameCard";
 import { Fonts } from "@/constants/fonts";
 import { GAMES, GameDef } from "@/constants/games";
 import { Session, generateId, useApp } from "@/contexts/AppContext";
+import { createOnlineSession } from "@/services/onlineSession";
 import { useColors } from "@/hooks/useColors";
 
-const STEP_LABELS = ["اختار اللعبة", "أضف اللاعبين", "اعدادات الجلسة"];
+type SessionMode = "local" | "online";
+
+// local steps: mode(0) → game(1) → players(2) → settings(3)
+// online steps: mode(0) → game(1) → host-name(2) → settings(3)
+const LOCAL_STEP_LABELS = ["كيف تلعبون؟", "اختار اللعبة", "أضف اللاعبين", "اعدادات الجلسة"];
+const ONLINE_STEP_LABELS = ["كيف تلعبون؟", "اختار اللعبة", "اسمك", "اعدادات الجلسة"];
 
 export default function NewSessionScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { addSession } = useApp();
+  const { addSession, profile } = useApp();
 
   const [step, setStep] = useState(0);
+  const [mode, setMode] = useState<SessionMode | null>(null);
   const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
   const [players, setPlayers] = useState<string[]>(["", "", "", ""]);
+  const [hostName, setHostName] = useState(profile.name ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
+  const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
+  const labels = mode === "online" ? ONLINE_STEP_LABELS : LOCAL_STEP_LABELS;
+
   const canNext = (): boolean => {
-    if (step === 0) return !!selectedGame;
-    if (step === 1) {
-      const minPlayers = selectedGame?.minPlayers ?? 2;
-      return players.filter((p) => p.trim().length > 0).length >= minPlayers;
+    if (step === 0) return !!mode;
+    if (step === 1) return !!selectedGame;
+    if (step === 2) {
+      if (mode === "online") return hostName.trim().length > 0;
+      return (
+        players.filter((p) => p.trim().length > 0).length >=
+        (selectedGame?.minPlayers ?? 2)
+      );
     }
     return true;
+  };
+
+  const handleSelectMode = (m: SessionMode) => {
+    Haptics.selectionAsync();
+    setMode(m);
+    setStep(1);
   };
 
   const handleSelectGame = (game: GameDef) => {
@@ -73,17 +95,20 @@ export default function NewSessionScreen() {
   const handleBack = () => {
     if (step === 0) {
       router.back();
+    } else if (step === 1) {
+      setMode(null);
+      setStep(0);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setStep((s) => s - 1);
     }
   };
 
-  const handleStart = () => {
+  const handleStartLocal = () => {
     if (!selectedGame) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const validPlayers = players
-      .filter((n, i) => i < selectedGame.maxPlayers)
+      .filter((_, i) => i < selectedGame.maxPlayers)
       .map((n, i) => ({
         id: generateId(),
         name: n.trim() || `لاعب ${i + 1}`,
@@ -101,14 +126,37 @@ export default function NewSessionScreen() {
     router.replace(`/session/${session.id}`);
   };
 
+  const handleStartOnline = async () => {
+    if (!selectedGame || !hostName.trim()) return;
+    setCreatingOnline(true);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const { code, hostPlayerId } = await createOnlineSession(
+        selectedGame.id,
+        targetScore || selectedGame.defaultTarget,
+        hostName.trim()
+      );
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace({
+        pathname: "/session/[id]",
+        params: { id: code, hostKey: hostPlayerId },
+      });
+    } catch (_e) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setCreatingOnline(false);
+    }
+  };
+
+  const isLastStep = step === 3;
+  const handleConfirm = () => {
+    if (mode === "local") handleStartLocal();
+    else handleStartOnline();
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View
-        style={[
-          styles.header,
-          { paddingTop: insets.top + webTop + 8 },
-        ]}
-      >
+      <View style={[styles.header, { paddingTop: insets.top + webTop + 8 }]}>
         <TouchableOpacity
           onPress={handleBack}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -117,28 +165,110 @@ export default function NewSessionScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={[styles.stepLabel, { color: colors.text }]}>
-            {STEP_LABELS[step]}
+            {labels[step]}
           </Text>
-          <View style={styles.stepDots}>
-            {STEP_LABELS.map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.stepDot,
-                  {
-                    backgroundColor: i <= step ? colors.gold : colors.textDim,
-                    width: i === step ? 20 : 8,
-                  },
-                ]}
-              />
-            ))}
-          </View>
+          {step > 0 && (
+            <View style={styles.stepDots}>
+              {[1, 2, 3].map((s) => (
+                <View
+                  key={s}
+                  style={[
+                    styles.stepDot,
+                    {
+                      backgroundColor: s <= step ? colors.gold : colors.textDim,
+                      width: s === step ? 20 : 8,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+          )}
         </View>
         <View style={{ width: 24 }} />
       </View>
 
       <View style={{ flex: 1 }}>
+        {/* Step 0: Mode selection */}
         {step === 0 && (
+          <View style={styles.modeContainer}>
+            <Text style={[styles.modeHint, { color: colors.textMuted }]}>
+              اختار طريقة اللعب
+            </Text>
+            <TouchableOpacity
+              onPress={() => handleSelectMode("local")}
+              activeOpacity={0.8}
+              style={[
+                styles.modeCard,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.modeIcon,
+                  { backgroundColor: `${colors.gold}22` },
+                ]}
+              >
+                <Feather name="smartphone" size={28} color={colors.gold} />
+              </View>
+              <View style={styles.modeText}>
+                <Text style={[styles.modeTitle, { color: colors.text }]}>
+                  جلسة محلية
+                </Text>
+                <Text style={[styles.modeDesc, { color: colors.textMuted }]}>
+                  واحد يدخل الأسماء من تلفونه والكل يشوف
+                </Text>
+              </View>
+              <Feather name="chevron-left" size={20} color={colors.textDim} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => handleSelectMode("online")}
+              activeOpacity={0.8}
+              style={[
+                styles.modeCard,
+                {
+                  backgroundColor: colors.surfaceHigh,
+                  borderColor: `${colors.gold}44`,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.modeIcon,
+                  { backgroundColor: `${colors.gold}33` },
+                ]}
+              >
+                <Feather name="wifi" size={28} color={colors.gold} />
+              </View>
+              <View style={styles.modeText}>
+                <View style={styles.modeTitleRow}>
+                  <View
+                    style={[
+                      styles.newBadge,
+                      { backgroundColor: colors.gold },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.newBadgeText, { color: colors.background }]}
+                    >
+                      جديد
+                    </Text>
+                  </View>
+                  <Text style={[styles.modeTitle, { color: colors.gold }]}>
+                    جلسة مشتركة
+                  </Text>
+                </View>
+                <Text style={[styles.modeDesc, { color: colors.textMuted }]}>
+                  كل لاعب ينضم من تلفونه بكود رقمي
+                </Text>
+              </View>
+              <Feather name="chevron-left" size={20} color={colors.gold} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Step 1: Game selection */}
+        {step === 1 && (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
@@ -154,7 +284,8 @@ export default function NewSessionScreen() {
           </ScrollView>
         )}
 
-        {step === 1 && (
+        {/* Step 2a: Player names (local) */}
+        {step === 2 && mode === "local" && (
           <KeyboardAwareScrollViewCompat
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
@@ -215,19 +346,13 @@ export default function NewSessionScreen() {
                 </View>
               </View>
             ))}
-
             {selectedGame && players.length < selectedGame.maxPlayers && (
               <TouchableOpacity
                 onPress={addPlayer}
-                style={[
-                  styles.addPlayerBtn,
-                  { borderColor: colors.borderStrong },
-                ]}
+                style={[styles.addPlayerBtn, { borderColor: colors.borderStrong }]}
               >
                 <Feather name="user-plus" size={18} color={colors.textMuted} />
-                <Text
-                  style={[styles.addPlayerText, { color: colors.textMuted }]}
-                >
+                <Text style={[styles.addPlayerText, { color: colors.textMuted }]}>
                   أضف لاعب
                 </Text>
               </TouchableOpacity>
@@ -235,56 +360,92 @@ export default function NewSessionScreen() {
           </KeyboardAwareScrollViewCompat>
         )}
 
-        {step === 2 && (
+        {/* Step 2b: Host name (online) */}
+        {step === 2 && mode === "online" && (
+          <KeyboardAwareScrollViewCompat
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View
+              style={[styles.onlineInfo, { backgroundColor: colors.surface }]}
+            >
+              <Feather name="wifi" size={20} color={colors.gold} />
+              <Text style={[styles.onlineInfoText, { color: colors.textMuted }]}>
+                سيُنشئ لك الأب كوداً رقمياً لمشاركته مع أصحابك
+              </Text>
+            </View>
+            <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
+              اسمك أنت (المضيف)
+            </Text>
+            <TextInput
+              style={[
+                styles.playerInput,
+                {
+                  backgroundColor: colors.surface,
+                  color: colors.text,
+                  borderColor: hostName.trim() ? colors.gold : colors.border,
+                  fontFamily: Fonts.heading,
+                  fontSize: 18,
+                },
+              ]}
+              value={hostName}
+              onChangeText={setHostName}
+              placeholder="اسمك"
+              placeholderTextColor={colors.textDim}
+              textAlign="right"
+              returnKeyType="next"
+              autoFocus
+            />
+            <Text style={[styles.fieldHint, { color: colors.textDim }]}>
+              باقي اللاعبين ينضمون بكود الجلسة من تلفوناتهم
+            </Text>
+          </KeyboardAwareScrollViewCompat>
+        )}
+
+        {/* Step 3: Settings */}
+        {step === 3 && (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
           >
             {selectedGame && (
               <View
-                style={[
-                  styles.gameSummary,
-                  { backgroundColor: colors.surface },
-                ]}
+                style={[styles.gameSummary, { backgroundColor: colors.surface }]}
               >
-                <Text
-                  style={[styles.gameSummaryTitle, { color: colors.gold }]}
-                >
+                <Text style={[styles.gameSummaryTitle, { color: colors.gold }]}>
                   {selectedGame.name}
                 </Text>
                 <Text
-                  style={[
-                    styles.gameSummaryPlayers,
-                    { color: colors.textMuted },
-                  ]}
+                  style={[styles.gameSummaryPlayers, { color: colors.textMuted }]}
                 >
-                  {players.filter((p) => p.trim()).length > 0
-                    ? players.filter((p) => p.trim()).length
-                    : selectedGame.minPlayers}{" "}
-                  لاعبين — {selectedGame.isTeam ? "فريقين" : "فردي"}
+                  {mode === "online"
+                    ? `مشتركة — ${hostName} مضيف`
+                    : `${players.filter((p) => p.trim()).length} لاعبين — ${
+                        selectedGame.isTeam ? "فريقين" : "فردي"
+                      }`}
                 </Text>
-                <View style={styles.playerChips}>
-                  {players
-                    .filter((p) => p.trim())
-                    .map((name, i) => (
-                      <View
-                        key={i}
-                        style={[
-                          styles.chip,
-                          { backgroundColor: colors.surfaceRaised },
-                        ]}
-                      >
-                        <Text
+                {mode === "local" && (
+                  <View style={styles.playerChips}>
+                    {players
+                      .filter((p) => p.trim())
+                      .map((n, i) => (
+                        <View
+                          key={i}
                           style={[
-                            styles.chipText,
-                            { color: colors.textMuted },
+                            styles.chip,
+                            { backgroundColor: colors.surfaceRaised },
                           ]}
                         >
-                          {name}
-                        </Text>
-                      </View>
-                    ))}
-                </View>
+                          <Text
+                            style={[styles.chipText, { color: colors.textMuted }]}
+                          >
+                            {n}
+                          </Text>
+                        </View>
+                      ))}
+                  </View>
+                )}
               </View>
             )}
 
@@ -311,9 +472,7 @@ export default function NewSessionScreen() {
                       styles.targetBtn,
                       {
                         backgroundColor:
-                          targetScore === val
-                            ? colors.gold
-                            : colors.surface,
+                          targetScore === val ? colors.gold : colors.surface,
                         borderColor:
                           targetScore === val ? colors.gold : colors.border,
                       },
@@ -341,57 +500,64 @@ export default function NewSessionScreen() {
         )}
       </View>
 
-      <View
-        style={[
-          styles.footer,
-          {
-            paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8),
-            backgroundColor: colors.background,
-            borderTopColor: colors.border,
-          },
-        ]}
-      >
-        {step < 2 ? (
-          <TouchableOpacity
-            onPress={handleNext}
-            disabled={!canNext()}
-            style={[
-              styles.nextBtn,
-              {
-                backgroundColor: canNext()
-                  ? colors.gold
-                  : colors.surfaceRaised,
-              },
-            ]}
-          >
-            <Text
+      {step > 0 && (
+        <View
+          style={[
+            styles.footer,
+            {
+              paddingBottom: insets.bottom + (Platform.OS === "web" ? 34 : 8),
+              backgroundColor: colors.background,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
+          {!isLastStep ? (
+            <TouchableOpacity
+              onPress={handleNext}
+              disabled={!canNext()}
               style={[
-                styles.nextBtnText,
-                {
-                  color: canNext() ? colors.background : colors.textDim,
-                },
+                styles.nextBtn,
+                { backgroundColor: canNext() ? colors.gold : colors.surfaceRaised },
               ]}
             >
-              التالي
-            </Text>
-            <Feather
-              name="arrow-left"
-              size={20}
-              color={canNext() ? colors.background : colors.textDim}
-            />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            onPress={handleStart}
-            style={[styles.nextBtn, { backgroundColor: colors.gold }]}
-          >
-            <Feather name="play" size={20} color={colors.background} />
-            <Text style={[styles.nextBtnText, { color: colors.background }]}>
-              ابدأ الجلسة
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+              <Text
+                style={[
+                  styles.nextBtnText,
+                  { color: canNext() ? colors.background : colors.textDim },
+                ]}
+              >
+                التالي
+              </Text>
+              <Feather
+                name="arrow-left"
+                size={20}
+                color={canNext() ? colors.background : colors.textDim}
+              />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={creatingOnline}
+              style={[styles.nextBtn, { backgroundColor: colors.gold }]}
+            >
+              {creatingOnline ? (
+                <ActivityIndicator color={colors.background} />
+              ) : (
+                <>
+                  <Feather
+                    name={mode === "online" ? "wifi" : "play"}
+                    size={20}
+                    color={colors.background}
+                  />
+                  <Text style={[styles.nextBtnText, { color: colors.background }]}>
+                    {mode === "online" ? "أنشئ الجلسة" : "ابدأ الجلسة"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -405,26 +571,70 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
   },
-  headerCenter: {
-    alignItems: "center",
-    gap: 6,
+  headerCenter: { alignItems: "center", gap: 6 },
+  stepLabel: { fontFamily: Fonts.heading, fontSize: 18, textAlign: "center" },
+  stepDots: { flexDirection: "row", gap: 5 },
+  stepDot: { height: 7, borderRadius: 4 },
+  modeContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    gap: 14,
   },
-  stepLabel: {
-    fontFamily: Fonts.heading,
-    fontSize: 18,
+  modeHint: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
     textAlign: "center",
+    marginBottom: 8,
   },
-  stepDots: {
-    flexDirection: "row",
-    gap: 5,
+  modeCard: {
+    borderRadius: 20,
+    borderWidth: 1.5,
+    padding: 20,
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 14,
   },
-  stepDot: {
-    height: 7,
-    borderRadius: 4,
+  modeIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  stepContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+  modeText: { flex: 1, alignItems: "flex-end", gap: 4 },
+  modeTitleRow: { flexDirection: "row-reverse", alignItems: "center", gap: 8 },
+  modeTitle: { fontFamily: Fonts.heading, fontSize: 18 },
+  modeDesc: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right" },
+  newBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  newBadgeText: { fontFamily: Fonts.body, fontSize: 10 },
+  stepContent: { paddingHorizontal: 16, paddingTop: 8 },
+  onlineInfo: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    marginBottom: 20,
+  },
+  onlineInfoText: {
+    fontFamily: Fonts.body,
+    fontSize: 14,
+    textAlign: "right",
+    flex: 1,
+    lineHeight: 22,
+  },
+  fieldLabel: {
+    fontFamily: Fonts.heading,
+    fontSize: 16,
+    textAlign: "right",
+    marginBottom: 8,
+  },
+  fieldHint: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    textAlign: "right",
+    marginTop: 8,
   },
   playerInputRow: {
     flexDirection: "row-reverse",
@@ -439,9 +649,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  playerNumText: {
-    fontSize: 14,
-  },
+  playerNumText: { fontSize: 14 },
   playerInput: {
     flex: 1,
     height: 52,
@@ -468,10 +676,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
-  addPlayerText: {
-    fontFamily: Fonts.body,
-    fontSize: 15,
-  },
+  addPlayerText: { fontFamily: Fonts.body, fontSize: 15 },
   gameSummary: {
     borderRadius: 16,
     padding: 16,
@@ -479,16 +684,8 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     gap: 8,
   },
-  gameSummaryTitle: {
-    fontFamily: Fonts.heading,
-    fontSize: 20,
-    textAlign: "center",
-  },
-  gameSummaryPlayers: {
-    fontFamily: Fonts.body,
-    fontSize: 14,
-    textAlign: "center",
-  },
+  gameSummaryTitle: { fontFamily: Fonts.heading, fontSize: 20 },
+  gameSummaryPlayers: { fontFamily: Fonts.body, fontSize: 14 },
   playerChips: {
     flexDirection: "row-reverse",
     flexWrap: "wrap",
@@ -496,33 +693,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 4,
   },
-  chip: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  chipText: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-  },
-  settingBlock: {
-    gap: 10,
-  },
-  settingLabel: {
-    fontFamily: Fonts.heading,
-    fontSize: 18,
-    textAlign: "right",
-  },
-  settingDesc: {
-    fontFamily: Fonts.body,
-    fontSize: 13,
-    textAlign: "right",
-  },
-  targetRow: {
-    flexDirection: "row-reverse",
-    gap: 10,
-    marginTop: 8,
-  },
+  chip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
+  chipText: { fontFamily: Fonts.body, fontSize: 13 },
+  settingBlock: { gap: 10 },
+  settingLabel: { fontFamily: Fonts.heading, fontSize: 18, textAlign: "right" },
+  settingDesc: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right" },
+  targetRow: { flexDirection: "row-reverse", gap: 10, marginTop: 8 },
   targetBtn: {
     flex: 1,
     height: 52,
@@ -531,14 +707,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  targetBtnText: {
-    fontSize: 18,
-  },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    borderTopWidth: 1,
-  },
+  targetBtnText: { fontSize: 18 },
+  footer: { paddingHorizontal: 16, paddingTop: 12, borderTopWidth: 1 },
   nextBtn: {
     flexDirection: "row-reverse",
     height: 56,
@@ -547,8 +717,5 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
   },
-  nextBtnText: {
-    fontFamily: Fonts.heading,
-    fontSize: 18,
-  },
+  nextBtnText: { fontFamily: Fonts.heading, fontSize: 18 },
 });
