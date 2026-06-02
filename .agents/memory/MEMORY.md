@@ -1,0 +1,2 @@
+- [Tarneeb scoring convention](tarneeb-scoring.md) — teams are players[0]+[2] vs players[1]+[3] (partners across); display grid rows are [0,1] and [2,3]
+- [Score entry game routing](score-entry-routing.md) — ScoreEntryModal is game-aware: tarneeb/tarneeb_sy → TarneebEntry, terkis variants → TerkisEntry, all others → GenericEntry

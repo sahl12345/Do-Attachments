@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { ConfettiBurst } from "@/components/ConfettiBurst";
 import { PlayerScoreCard } from "@/components/PlayerScoreCard";
 import { ScoreEntryModal } from "@/components/ScoreEntryModal";
 import { Fonts } from "@/constants/fonts";
@@ -556,7 +557,7 @@ export default function SessionScreen() {
           <>
             <View style={styles.scoreRow}>
               {[scoredPlayers[0], scoredPlayers[1]].map(
-                (ps) =>
+                (ps, idx) =>
                   ps && (
                     <PlayerScoreCard
                       key={ps.player.id}
@@ -564,14 +565,14 @@ export default function SessionScreen() {
                       score={ps.total}
                       lastDelta={sessionRounds.length > 0 ? ps.lastDelta : undefined}
                       isWinner={sessionWinnerId === ps.player.id}
-                      teamLabel={game?.isTeam ? "الفريق أ" : undefined}
+                      teamLabel={game?.isTeam ? (idx === 0 ? "فريق أ ♠" : "فريق ب ♥") : undefined}
                     />
                   )
               )}
             </View>
             <View style={styles.scoreRow}>
               {[scoredPlayers[2], scoredPlayers[3]].map(
-                (ps) =>
+                (ps, idx) =>
                   ps && (
                     <PlayerScoreCard
                       key={ps.player.id}
@@ -579,7 +580,7 @@ export default function SessionScreen() {
                       score={ps.total}
                       lastDelta={sessionRounds.length > 0 ? ps.lastDelta : undefined}
                       isWinner={sessionWinnerId === ps.player.id}
-                      teamLabel={game?.isTeam ? "الفريق ب" : undefined}
+                      teamLabel={game?.isTeam ? (idx === 0 ? "فريق أ ♠" : "فريق ب ♥") : undefined}
                     />
                   )
               )}
@@ -689,6 +690,7 @@ export default function SessionScreen() {
         visible={showScoreModal}
         players={sessionPlayers as { id: string; name: string }[]}
         roundNumber={sessionRounds.length + 1}
+        gameId={session?.gameId}
         onClose={() => setShowScoreModal(false)}
         onSubmit={handleAddRound}
       />
@@ -700,6 +702,7 @@ export default function SessionScreen() {
         statusBarTranslucent
       >
         <View style={styles.winnerOverlay}>
+          <ConfettiBurst active={showWinner} />
           <Animated.View
             style={[
               styles.winnerCard,
@@ -718,24 +721,36 @@ export default function SessionScreen() {
               },
             ]}
           >
-            <Text style={[styles.winnerCrown, { color: colors.gold }]}>★</Text>
+            <Text style={[styles.winnerCrown, { color: colors.gold }]}>♛</Text>
             <Text style={[styles.winnerTitle, { color: colors.gold }]}>
               {winnerPlayer?.name ?? "الفائز"}
             </Text>
             <Text style={[styles.winnerSub, { color: colors.textMuted }]}>
-              فاز بعد {sessionRounds.length} جولة
+              فاز بعد {sessionRounds.length} جولة 🎉
             </Text>
-            <TouchableOpacity
-              onPress={() => {
-                setShowWinner(false);
-                router.back();
-              }}
-              style={[styles.winnerBtn, { backgroundColor: colors.gold }]}
-            >
-              <Text style={[styles.winnerBtnText, { color: colors.background }]}>
-                الرئيسية
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.winnerBtns}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowWinner(false);
+                }}
+                style={[styles.winnerSecBtn, { borderColor: colors.borderStrong }]}
+              >
+                <Text style={[styles.winnerSecText, { color: colors.textMuted }]}>
+                  ابقَ هنا
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowWinner(false);
+                  router.back();
+                }}
+                style={[styles.winnerBtn, { backgroundColor: colors.gold }]}
+              >
+                <Text style={[styles.winnerBtnText, { color: colors.background }]}>
+                  الرئيسية
+                </Text>
+              </TouchableOpacity>
+            </View>
           </Animated.View>
         </View>
       </Modal>
@@ -888,6 +903,9 @@ const styles = StyleSheet.create({
   winnerCrown: { fontSize: 56, textAlign: "center" },
   winnerTitle: { fontFamily: Fonts.heading, fontSize: 32, textAlign: "center" },
   winnerSub: { fontFamily: Fonts.body, fontSize: 16, textAlign: "center" },
-  winnerBtn: { paddingHorizontal: 40, paddingVertical: 14, borderRadius: 14, marginTop: 8 },
+  winnerBtns: { flexDirection: "row", gap: 10, marginTop: 8, width: "100%" },
+  winnerBtn: { flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   winnerBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
+  winnerSecBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  winnerSecText: { fontFamily: Fonts.heading, fontSize: 15 },
 });

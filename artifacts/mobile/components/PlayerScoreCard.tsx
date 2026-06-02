@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
 
+import { CountUpText } from "@/components/CountUpText";
 import { Fonts } from "@/constants/fonts";
 import { useColors } from "@/hooks/useColors";
 
@@ -30,16 +31,16 @@ export function PlayerScoreCard({
       prevScore.current = score;
       Animated.sequence([
         Animated.spring(scaleAnim, {
-          toValue: 1.08,
+          toValue: 1.1,
           useNativeDriver: true,
-          speed: 200,
-          bounciness: 15,
+          speed: 300,
+          bounciness: 18,
         }),
         Animated.spring(scaleAnim, {
           toValue: 1,
           useNativeDriver: true,
           speed: 200,
-          bounciness: 10,
+          bounciness: 8,
         }),
       ]).start();
     }
@@ -86,9 +87,15 @@ export function PlayerScoreCard({
       >
         {name}
       </Text>
-      <Text style={[styles.score, { color: scoreColor }]}>
-        {isEliminated ? "خارج" : score.toLocaleString("ar-SA")}
-      </Text>
+      {isEliminated ? (
+        <Text style={[styles.score, { color: scoreColor }]}>خارج</Text>
+      ) : (
+        <CountUpText
+          value={score}
+          style={[styles.score, { color: scoreColor }]}
+          duration={500}
+        />
+      )}
       {lastDelta !== undefined && !isEliminated && (
         <Text style={[styles.delta, { color: deltaColor }]}>
           {lastDelta >= 0 ? `+${lastDelta}` : `${lastDelta}`}
