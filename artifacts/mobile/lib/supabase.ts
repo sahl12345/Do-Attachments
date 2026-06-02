@@ -11,9 +11,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: Platform.OS === "web",
-    // PKCE is required for native OAuth — it uses code+code_verifier instead
-    // of returning raw tokens in the URL fragment (which can be stripped by iOS)
-    flowType: "pkce",
+    // implicit: tokens come back in the URL fragment — no code_verifier state
+    // to lose if the app reinitializes between OAuth start and callback
+    flowType: "implicit",
   },
 });
 
