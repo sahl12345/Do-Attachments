@@ -7,6 +7,15 @@ import React, {
   useState,
 } from "react";
 
+import { supabase, SupabaseUser } from "@/lib/supabase";
+import {
+  deleteSessionRemote,
+  fetchProfile,
+  fetchSessions,
+  upsertProfile,
+  upsertSession,
+} from "@/services/auth";
+
 export interface Player {
   id: string;
   name: string;
@@ -29,115 +38,177 @@ export interface Session {
   winnerId?: string;
 }
 
-export interface UserProfile {
-  name: string;
-  hasSeenOnboarding: boolean;
-}
-
 interface AppContextType {
   sessions: Session[];
-  profile: UserProfile;
+  user: SupabaseUser | null;
+  userName: string;
   isLoading: boolean;
   addSession: (session: Session) => void;
   updateSession: (id: string, updates: Partial<Session>) => void;
   deleteSession: (id: string) => void;
-  setProfile: (profile: UserProfile) => void;
+  updateUserName: (name: string) => Promise<void>;
+  signOut: () => Promise<void>;
+  refreshSessions: () => Promise<void>;
 }
-
-const defaultProfile: UserProfile = {
-  name: "",
-  hasSeenOnboarding: false,
-};
 
 const AppContext = createContext<AppContextType>({
   sessions: [],
-  profile: defaultProfile,
+  user: null,
+  userName: "",
   isLoading: true,
   addSession: () => {},
   updateSession: () => {},
   deleteSession: () => {},
-  setProfile: () => {},
+  updateUserName: async () => {},
+  signOut: async () => {},
+  refreshSessions: async () => {},
 });
 
-const SESSIONS_KEY = "@tasheedeh_sessions";
-const PROFILE_KEY = "@tasheedeh_profile";
+const SESSIONS_KEY = "@tasheedeh_sessions_v2";
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [profile, setProfileState] = useState<UserProfile>(defaultProfile);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [userName, setUserName] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [sessionsRaw, profileRaw] = await Promise.all([
-          AsyncStorage.getItem(SESSIONS_KEY),
-          AsyncStorage.getItem(PROFILE_KEY),
-        ]);
-        if (sessionsRaw) setSessions(JSON.parse(sessionsRaw));
-        if (profileRaw) setProfileState(JSON.parse(profileRaw));
-      } catch (_e) {
-      } finally {
-        setIsLoading(false);
+  const loadUserData = useCallback(async (u: SupabaseUser) => {
+    try {
+      const [{ data: profile }, remoteSessions] = await Promise.all([
+        fetchProfile(u.id),
+        fetchSessions(u.id),
+      ]);
+      if (profile?.name) setUserName(profile.name);
+      if (remoteSessions.length > 0) {
+        setSessions(remoteSessions);
+        await AsyncStorage.setItem(
+          SESSIONS_KEY,
+          JSON.stringify(remoteSessions)
+        );
+      } else {
+        const cached = await AsyncStorage.getItem(SESSIONS_KEY);
+        if (cached) setSessions(JSON.parse(cached));
       }
-    };
-    load();
+    } catch (_) {
+      const cached = await AsyncStorage.getItem(SESSIONS_KEY);
+      if (cached) setSessions(JSON.parse(cached));
+    }
   }, []);
 
-  const saveSessions = useCallback(async (next: Session[]) => {
-    await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(next));
-  }, []);
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (!mounted) return;
+        const u = session?.user ?? null;
+        setUser(u);
+        if (u) {
+          await loadUserData(u);
+        }
+      } catch (e) {
+        console.warn("Supabase getSession error:", e);
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    };
+
+    init();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return;
+      const u = session?.user ?? null;
+      setUser(u);
+
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        if (u) await loadUserData(u);
+      } else if (event === "SIGNED_OUT") {
+        setSessions([]);
+        setUserName("");
+        await AsyncStorage.removeItem(SESSIONS_KEY);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [loadUserData]);
+
+  const refreshSessions = useCallback(async () => {
+    if (!user) return;
+    const remote = await fetchSessions(user.id);
+    setSessions(remote);
+    await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(remote));
+  }, [user]);
 
   const addSession = useCallback(
     (session: Session) => {
       setSessions((prev) => {
         const next = [session, ...prev];
-        saveSessions(next);
+        AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(next));
         return next;
       });
+      if (user) upsertSession(user.id, session);
     },
-    [saveSessions]
+    [user]
   );
 
   const updateSession = useCallback(
     (id: string, updates: Partial<Session>) => {
       setSessions((prev) => {
-        const next = prev.map((s) =>
-          s.id === id ? { ...s, ...updates } : s
-        );
-        saveSessions(next);
+        const next = prev.map((s) => (s.id === id ? { ...s, ...updates } : s));
+        AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(next));
+        const updated = next.find((s) => s.id === id);
+        if (user && updated) upsertSession(user.id, updated);
         return next;
       });
     },
-    [saveSessions]
+    [user]
   );
 
   const deleteSession = useCallback(
     (id: string) => {
       setSessions((prev) => {
         const next = prev.filter((s) => s.id !== id);
-        saveSessions(next);
+        AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(next));
         return next;
       });
+      if (user) deleteSessionRemote(id);
     },
-    [saveSessions]
+    [user]
   );
 
-  const setProfile = useCallback(async (p: UserProfile) => {
-    setProfileState(p);
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(p));
+  const updateUserName = useCallback(
+    async (name: string) => {
+      setUserName(name);
+      if (user) await upsertProfile(user.id, name);
+    },
+    [user]
+  );
+
+  const handleSignOut = useCallback(async () => {
+    await supabase.auth.signOut();
   }, []);
 
   return (
     <AppContext.Provider
       value={{
         sessions,
-        profile,
+        user,
+        userName,
         isLoading,
         addSession,
         updateSession,
         deleteSession,
-        setProfile,
+        updateUserName,
+        signOut: handleSignOut,
+        refreshSessions,
       }}
     >
       {children}

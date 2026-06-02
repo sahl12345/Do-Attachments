@@ -33,13 +33,13 @@ export default function NewSessionScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { addSession, profile } = useApp();
+  const { addSession, userName } = useApp();
 
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState<SessionMode | null>(null);
   const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
   const [players, setPlayers] = useState<string[]>(["", "", "", ""]);
-  const [hostName, setHostName] = useState(profile.name ?? "");
+  const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
   const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;

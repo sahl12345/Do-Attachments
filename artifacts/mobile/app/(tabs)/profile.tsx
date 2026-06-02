@@ -20,39 +20,50 @@ import { useColors } from "@/hooks/useColors";
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { profile, setProfile, sessions } = useApp();
-  const [name, setName] = useState(profile.name);
+  const { userName, updateUserName, signOut, user, sessions } = useApp();
+  const [name, setName] = useState(userName);
   const [editing, setEditing] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
   const totalSessions = sessions.length;
-  const totalWins = sessions.filter((s) =>
-    s.completedAt &&
-    s.players.some((p) => p.name === profile.name && p.id === s.winnerId)
+  const totalWins = sessions.filter(
+    (s) =>
+      s.completedAt &&
+      s.players.some((p) => p.name === userName && p.id === s.winnerId)
   ).length;
 
   const handleSave = async () => {
     if (!name.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await setProfile({ ...profile, name: name.trim() });
+    await updateUserName(name.trim());
     setEditing(false);
   };
 
-  const handleClearData = () => {
-    Alert.alert(
-      "مسح كل البيانات",
-      "هذا سيحذف كل الجلسات والتاريخ. متأكد؟",
-      [
-        { text: "إلغاء", style: "cancel" },
-        {
-          text: "احذف كل شي",
-          style: "destructive",
-          onPress: async () => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          },
+  const handleSignOut = () => {
+    Alert.alert("تسجيل الخروج", "متأكد إنك تبي تخرج؟", [
+      { text: "إلغاء", style: "cancel" },
+      {
+        text: "خروج",
+        style: "destructive",
+        onPress: () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          signOut();
         },
-      ]
-    );
+      },
+    ]);
+  };
+
+  const handleClearData = () => {
+    Alert.alert("مسح كل البيانات", "هذا سيحذف كل الجلسات والتاريخ. متأكد؟", [
+      { text: "إلغاء", style: "cancel" },
+      {
+        text: "احذف كل شي",
+        style: "destructive",
+        onPress: async () => {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        },
+      },
+    ]);
   };
 
   return (
@@ -62,7 +73,8 @@ export default function ProfileScreen() {
         styles.content,
         {
           paddingTop: insets.top + webTop + 16,
-          paddingBottom: insets.bottom + 100 + (Platform.OS === "web" ? 34 : 0),
+          paddingBottom:
+            insets.bottom + 100 + (Platform.OS === "web" ? 34 : 0),
         },
       ]}
       showsVerticalScrollIndicator={false}
@@ -104,21 +116,28 @@ export default function ProfileScreen() {
           </View>
         ) : (
           <TouchableOpacity
-            onPress={() => setEditing(true)}
+            onPress={() => {
+              setName(userName);
+              setEditing(true);
+            }}
             style={styles.nameRow}
           >
             <Feather name="edit-2" size={16} color={colors.textDim} />
             <Text style={[styles.profileName, { color: colors.text }]}>
-              {profile.name}
+              {userName || "بدون اسم"}
             </Text>
           </TouchableOpacity>
         )}
+
+        {user?.phone ? (
+          <Text style={[styles.phone, { color: colors.textMuted }]}>
+            {user.phone}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.statsRow}>
-        <View
-          style={[styles.miniStat, { backgroundColor: colors.surface }]}
-        >
+        <View style={[styles.miniStat, { backgroundColor: colors.surface }]}>
           <Text
             style={[
               styles.miniStatVal,
@@ -131,9 +150,7 @@ export default function ProfileScreen() {
             جلسة
           </Text>
         </View>
-        <View
-          style={[styles.miniStat, { backgroundColor: colors.surface }]}
-        >
+        <View style={[styles.miniStat, { backgroundColor: colors.surface }]}>
           <Text
             style={[
               styles.miniStatVal,
@@ -153,7 +170,9 @@ export default function ProfileScreen() {
           الإعدادات
         </Text>
 
-        <View style={[styles.settingsCard, { backgroundColor: colors.surface }]}>
+        <View
+          style={[styles.settingsCard, { backgroundColor: colors.surface }]}
+        >
           <SettingRow
             icon="info"
             label="الإصدار"
@@ -170,10 +189,29 @@ export default function ProfileScreen() {
         </View>
 
         <TouchableOpacity
+          onPress={handleSignOut}
+          style={[
+            styles.dangerBtn,
+            {
+              borderColor: `${colors.gold}44`,
+              backgroundColor: `${colors.gold}11`,
+            },
+          ]}
+        >
+          <Text style={[styles.dangerText, { color: colors.gold }]}>
+            تسجيل الخروج
+          </Text>
+          <Feather name="log-out" size={18} color={colors.gold} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
           onPress={handleClearData}
           style={[
             styles.dangerBtn,
-            { borderColor: `${colors.red}44`, backgroundColor: `${colors.red}11` },
+            {
+              borderColor: `${colors.red}44`,
+              backgroundColor: `${colors.red}11`,
+            },
           ]}
         >
           <Text style={[styles.dangerText, { color: colors.red }]}>
@@ -249,7 +287,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 24,
     alignItems: "center",
-    gap: 16,
+    gap: 12,
     marginBottom: 16,
   },
   avatar: {
@@ -268,6 +306,11 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.heading,
     fontSize: 22,
     textAlign: "center",
+  },
+  phone: {
+    fontFamily: "IBMPlexMono_400Regular",
+    fontSize: 13,
+    letterSpacing: 0.5,
   },
   editRow: {
     flexDirection: "row-reverse",
@@ -332,7 +375,7 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 14,
     borderWidth: 1,
-    marginTop: 8,
+    marginTop: 4,
   },
   dangerText: {
     fontFamily: Fonts.heading,

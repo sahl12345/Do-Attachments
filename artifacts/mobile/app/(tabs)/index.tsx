@@ -21,7 +21,7 @@ export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { sessions, profile, deleteSession } = useApp();
+  const { sessions, userName, deleteSession } = useApp();
 
   const recentSessions = sessions.slice(0, 5);
   const activeSessions = sessions.filter((s) => !s.completedAt);
@@ -44,7 +44,7 @@ export default function HomeScreen() {
           أهلاً
         </Text>
         <Text style={[styles.greetingName, { color: colors.text }]}>
-          {profile.name}
+          {userName}
         </Text>
       </View>
 

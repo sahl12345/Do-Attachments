@@ -22,10 +22,10 @@ export default function JoinScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { profile } = useApp();
+  const { userName } = useApp();
 
   const [code, setCode] = useState("");
-  const [name, setName] = useState(profile.name ?? "");
+  const [name, setName] = useState(userName ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const codeRef = useRef<TextInput>(null);

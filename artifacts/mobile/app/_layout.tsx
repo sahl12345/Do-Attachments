@@ -30,17 +30,19 @@ I18nManager.allowRTL(true);
 const queryClient = new QueryClient();
 
 function RootLayoutNav() {
-  const { profile, isLoading } = useApp();
+  const { user, isLoading } = useApp();
   const segments = useSegments();
   const router = useRouter();
 
   useEffect(() => {
     if (isLoading) return;
     const inOnboarding = segments[0] === "onboarding";
-    if (!profile.hasSeenOnboarding && !inOnboarding) {
+    if (!user && !inOnboarding) {
       router.replace("/onboarding");
+    } else if (user && inOnboarding) {
+      router.replace("/(tabs)");
     }
-  }, [profile.hasSeenOnboarding, isLoading, segments, router]);
+  }, [user, isLoading, segments, router]);
 
   return (
     <Stack
