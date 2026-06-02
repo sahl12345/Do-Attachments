@@ -52,14 +52,27 @@ export async function signInWithGoogle() {
   if (error) throw error;
 }
 
-// Parse tokens from the callback URL (they're in the fragment for implicit flow)
+// Handle the OAuth callback URL — supports both PKCE (code in query) and
+// implicit flow (access_token in fragment). PKCE is preferred and default.
 async function _handleOAuthCallback(url: string) {
-  const fragment = url.split("#")[1] ?? "";
-  const query = url.split("?")[1]?.split("#")[0] ?? "";
-  const params = new URLSearchParams(fragment || query);
+  // 1. PKCE: Supabase returns ?code=... — pass the full URL and let the client
+  //    use the stored code_verifier to exchange for a session.
+  const queryStr = url.split("?")[1]?.split("#")[0] ?? "";
+  const queryParams = new URLSearchParams(queryStr);
+  const code = queryParams.get("code");
 
-  const accessToken = params.get("access_token");
-  const refreshToken = params.get("refresh_token");
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(url);
+    if (error) throw error;
+    return;
+  }
+
+  // 2. Implicit fallback: tokens in URL fragment (#access_token=...&refresh_token=...)
+  //    Note: iOS may strip the fragment, which is why PKCE is preferred.
+  const fragment = url.split("#")[1] ?? "";
+  const fragParams = new URLSearchParams(fragment);
+  const accessToken = fragParams.get("access_token");
+  const refreshToken = fragParams.get("refresh_token");
 
   if (accessToken && refreshToken) {
     const { error } = await supabase.auth.setSession({
@@ -70,15 +83,7 @@ async function _handleOAuthCallback(url: string) {
     return;
   }
 
-  // PKCE flow: exchange code for session
-  const code = params.get("code");
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) throw error;
-    return;
-  }
-
-  throw new Error("ما لقيت tokens بالـ callback URL");
+  throw new Error("ما لقيت tokens بالـ callback URL: " + url.slice(0, 100));
 }
 
 export async function signOut() {

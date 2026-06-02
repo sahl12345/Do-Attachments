@@ -10,8 +10,10 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     storage: AsyncStorage as any,
     autoRefreshToken: true,
     persistSession: true,
-    // On web: parse the OAuth tokens from the URL hash after Google redirect
     detectSessionInUrl: Platform.OS === "web",
+    // PKCE is required for native OAuth — it uses code+code_verifier instead
+    // of returning raw tokens in the URL fragment (which can be stripped by iOS)
+    flowType: "pkce",
   },
 });
 
