@@ -1,39 +1,26 @@
-import Constants from "expo-constants";
 import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
 
 import { supabase } from "@/lib/supabase";
 import { Session } from "@/contexts/AppContext";
 
-// Must be called once at startup to allow WebBrowser to complete auth on iOS
+// Required on iOS to allow WebBrowser to complete auth sessions
 WebBrowser.maybeCompleteAuthSession();
+
+// The deployed web URL — both web and native use this as the OAuth redirect target.
+// On native, iOS converts https:// → exps:// inside ASWebAuthenticationSession,
+// which we normalize back in _handleOAuthCallback.
+const OAUTH_REDIRECT = "https://do-attachments.replit.app/auth/callback";
 
 // ── Google OAuth ───────────────────────────────────────────────────────────────
 
-function _nativeRedirectUri(): string {
-  // In Expo Go: hostUri = "xxx.expo.sisko.replit.dev" → "exp://xxx.../--/auth/callback"
-  // In production standalone: no hostUri → use the app's custom scheme
-  // We must NOT use https:// here — iOS converts it to exps:// which breaks
-  // WebBrowser.openAuthSessionAsync callback detection.
-  const hostUri = Constants.expoConfig?.hostUri;
-  if (hostUri) {
-    return `exp://${hostUri}/--/auth/callback`;
-  }
-  return "mobile://auth/callback";
-}
-
 export async function signInWithGoogle() {
   if (Platform.OS !== "web") {
-    // Native (Expo Go or standalone):
-    // 1. Get the OAuth URL from Supabase without auto-redirecting
-    // 2. Open it in a browser session via expo-web-browser
-    // 3. Parse the returned tokens and set the Supabase session
-    const redirectTo = _nativeRedirectUri();
-
+    // 1. Get the OAuth URL from Supabase (skip auto browser redirect)
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo,
+        redirectTo: OAUTH_REDIRECT,
         queryParams: { access_type: "offline", prompt: "select_account" },
         skipBrowserRedirect: true,
       },
@@ -42,7 +29,13 @@ export async function signInWithGoogle() {
     if (error) throw error;
     if (!data.url) throw new Error("ما رجع رابط من Supabase");
 
-    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+    // 2. Open the OAuth URL in the system browser, watching for the callback
+    //    iOS will intercept https://do-attachments.replit.app and return it
+    //    as exps://do-attachments.replit.app — we handle that in the callback
+    const result = await WebBrowser.openAuthSessionAsync(
+      data.url,
+      OAUTH_REDIRECT
+    );
 
     if (result.type === "success") {
       await _handleOAuthCallback(result.url);
@@ -52,26 +45,25 @@ export async function signInWithGoogle() {
     return;
   }
 
-  // Web: standard redirect — page navigates to Google then comes back to /auth/callback
-  const redirectTo = `${window.location.origin}/auth/callback`;
+  // Web: standard redirect — page navigates to Google then back to /auth/callback
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo,
+      redirectTo: OAUTH_REDIRECT,
       queryParams: { access_type: "offline", prompt: "select_account" },
     },
   });
   if (error) throw error;
 }
 
-// Handle the OAuth callback URL — supports both PKCE (code in query) and
-// implicit flow (access_token in fragment). PKCE is preferred and default.
-async function _handleOAuthCallback(url: string) {
-  // 1. PKCE: Supabase returns ?code=... — pass the full URL and let the client
-  //    use the stored code_verifier to exchange for a session.
+// iOS converts https:// → exps:// inside ASWebAuthenticationSession.
+// Normalize it back so Supabase can validate and exchange the code.
+async function _handleOAuthCallback(rawUrl: string) {
+  const url = rawUrl.replace(/^exps:\/\//, "https://");
+
+  // PKCE flow: code in query params — pass full URL to exchangeCodeForSession
   const queryStr = url.split("?")[1]?.split("#")[0] ?? "";
-  const queryParams = new URLSearchParams(queryStr);
-  const code = queryParams.get("code");
+  const code = new URLSearchParams(queryStr).get("code");
 
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(url);
@@ -79,8 +71,7 @@ async function _handleOAuthCallback(url: string) {
     return;
   }
 
-  // 2. Implicit fallback: tokens in URL fragment (#access_token=...&refresh_token=...)
-  //    Note: iOS may strip the fragment, which is why PKCE is preferred.
+  // Implicit flow fallback: tokens in URL fragment
   const fragment = url.split("#")[1] ?? "";
   const fragParams = new URLSearchParams(fragment);
   const accessToken = fragParams.get("access_token");
@@ -95,7 +86,7 @@ async function _handleOAuthCallback(url: string) {
     return;
   }
 
-  throw new Error("ما لقيت tokens بالـ callback URL: " + url.slice(0, 100));
+  throw new Error("ما لقيت tokens بالـ callback URL: " + rawUrl.slice(0, 120));
 }
 
 export async function signOut() {
