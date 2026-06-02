@@ -80,11 +80,16 @@ export default function Onboarding() {
     setLoading(true);
     setError("");
     try {
-      const { error: err } = await signInWithGoogle();
-      if (err) throw err;
+      await signInWithGoogle();
+      // On web: page navigates away to Google, loading stays true (intentional)
+      // On native: WebBrowser handles it; session set → AppContext fires → routing happens
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (e: any) {
-      setError(e.message ?? "حدث خطأ، حاول مرة ثانية");
+      const msg: string = e?.message ?? "";
+      // Don't show error if user just cancelled
+      if (!msg.includes("ألغيت")) {
+        setError(msg || "حدث خطأ، حاول مرة ثانية");
+      }
       setLoading(false);
     }
   };
