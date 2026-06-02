@@ -78,7 +78,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         fetchProfile(u.id),
         fetchSessions(u.id),
       ]);
-      if (profile?.name) setUserName(profile.name);
+
+      if (profile?.name) {
+        setUserName(profile.name);
+      } else {
+        // Auto-populate name from Google OAuth metadata
+        const googleName =
+          u.user_metadata?.full_name ||
+          u.user_metadata?.name ||
+          u.user_metadata?.given_name ||
+          "";
+        if (googleName) {
+          setUserName(googleName);
+          await upsertProfile(u.id, googleName);
+        }
+      }
+
       if (remoteSessions.length > 0) {
         setSessions(remoteSessions);
         await AsyncStorage.setItem(

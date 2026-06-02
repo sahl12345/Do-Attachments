@@ -1,14 +1,22 @@
+import { Platform } from "react-native";
 import { supabase } from "@/lib/supabase";
 import { Session } from "@/contexts/AppContext";
 
-// ── Phone OTP ─────────────────────────────────────────────────────────────────
+// ── Google OAuth ───────────────────────────────────────────────────────────────
 
-export async function sendPhoneOTP(phone: string) {
-  return supabase.auth.signInWithOtp({ phone });
-}
+export async function signInWithGoogle() {
+  const redirectTo =
+    Platform.OS === "web" && typeof window !== "undefined"
+      ? window.location.origin
+      : undefined;
 
-export async function verifyPhoneOTP(phone: string, token: string) {
-  return supabase.auth.verifyOtp({ phone, token, type: "sms" });
+  return supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo,
+      queryParams: { access_type: "offline", prompt: "select_account" },
+    },
+  });
 }
 
 export async function signOut() {
@@ -46,7 +54,12 @@ export async function fetchSessions(userId: string): Promise<Session[]> {
 
 export async function upsertSession(userId: string, session: Session) {
   return supabase.from("game_sessions").upsert(
-    { id: session.id, user_id: userId, data: session, updated_at: new Date().toISOString() },
+    {
+      id: session.id,
+      user_id: userId,
+      data: session,
+      updated_at: new Date().toISOString(),
+    },
     { onConflict: "id" }
   );
 }

@@ -18,8 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Fonts } from "@/constants/fonts";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
-import { sendPhoneOTP, verifyPhoneOTP, upsertProfile } from "@/services/auth";
-import { supabase } from "@/lib/supabase";
+import { signInWithGoogle } from "@/services/auth";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
@@ -44,7 +43,7 @@ const SLIDES = [
   },
 ];
 
-type Step = "slides" | "phone" | "otp" | "name";
+type Step = "slides" | "name";
 
 export default function Onboarding() {
   const colors = useColors();
@@ -54,17 +53,11 @@ export default function Onboarding() {
 
   const [currentSlide, setCurrentSlide] = useState(0);
   const [step, setStep] = useState<Step>("slides");
-
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [fullPhone, setFullPhone] = useState("");
 
   const flatRef = useRef<FlatList>(null);
-  const otpRefs = useRef<(TextInput | null)[]>([]);
-
   const webTop = Platform.OS === "web" ? 67 : 0;
   const isLast = currentSlide === SLIDES.length - 1;
 
@@ -83,87 +76,20 @@ export default function Onboarding() {
     setCurrentSlide(SLIDES.length - 1);
   };
 
-  // ── Phone step ──────────────────────────────────────────────────────────────
-  const handleSendOTP = async () => {
-    const digits = phone.replace(/\D/g, "");
-    if (digits.length < 8) {
-      setError("أدخل رقم صحيح");
-      return;
-    }
-    const formatted = "+962" + digits.replace(/^0/, "");
-    setFullPhone(formatted);
+  const handleGoogleSignIn = async () => {
     setLoading(true);
     setError("");
     try {
-      const { error: err } = await sendPhoneOTP(formatted);
+      const { error: err } = await signInWithGoogle();
       if (err) throw err;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setStep("otp");
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch (e: any) {
       setError(e.message ?? "حدث خطأ، حاول مرة ثانية");
-    } finally {
       setLoading(false);
     }
   };
 
-  // ── OTP step ────────────────────────────────────────────────────────────────
-  const handleOTPChange = (val: string, idx: number) => {
-    const digit = val.replace(/\D/g, "").slice(-1);
-    const next = [...otp];
-    next[idx] = digit;
-    setOtp(next);
-    if (digit && idx < 5) {
-      otpRefs.current[idx + 1]?.focus();
-    }
-    if (next.every((d) => d !== "")) {
-      verifyCode(next.join(""));
-    }
-  };
-
-  const handleOTPKeyPress = (key: string, idx: number) => {
-    if (key === "Backspace" && !otp[idx] && idx > 0) {
-      otpRefs.current[idx - 1]?.focus();
-    }
-  };
-
-  const verifyCode = async (code: string) => {
-    setLoading(true);
-    setError("");
-    try {
-      const { data, error: err } = await verifyPhoneOTP(fullPhone, code);
-      if (err) throw err;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // Check if profile has a name
-      if (data.user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("name")
-          .eq("id", data.user.id)
-          .maybeSingle();
-        if (profile?.name) {
-          router.replace("/(tabs)");
-        } else {
-          setStep("name");
-        }
-      }
-    } catch (e: any) {
-      setError("الكود غير صحيح أو انتهت صلاحيته");
-      setOtp(["", "", "", "", "", ""]);
-      otpRefs.current[0]?.focus();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResend = async () => {
-    setError("");
-    setOtp(["", "", "", "", "", ""]);
-    const { error: err } = await sendPhoneOTP(fullPhone);
-    if (!err) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
-
-  // ── Name step ───────────────────────────────────────────────────────────────
-  const handleFinish = async () => {
+  const handleFinishName = async () => {
     if (!name.trim()) return;
     setLoading(true);
     try {
@@ -176,7 +102,6 @@ export default function Onboarding() {
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -192,6 +117,7 @@ export default function Onboarding() {
           },
         ]}
       >
+        {/* ── Slides ── */}
         {step === "slides" && (
           <>
             <FlatList
@@ -224,6 +150,7 @@ export default function Onboarding() {
                 </View>
               )}
             />
+
             <View style={styles.footer}>
               <View style={styles.dots}>
                 {SLIDES.map((_, i) => (
@@ -240,15 +167,41 @@ export default function Onboarding() {
                   />
                 ))}
               </View>
+
               {isLast ? (
-                <TouchableOpacity
-                  onPress={() => setStep("phone")}
-                  style={[styles.btn, { backgroundColor: colors.gold }]}
-                >
-                  <Text style={[styles.btnText, { color: colors.background }]}>
-                    ابدأ الرحلة
-                  </Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    onPress={handleGoogleSignIn}
+                    disabled={loading}
+                    style={[styles.googleBtn, { backgroundColor: colors.gold }]}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color={colors.background} />
+                    ) : (
+                      <>
+                        <Text
+                          style={[styles.googleIcon]}
+                        >
+                          G
+                        </Text>
+                        <Text
+                          style={[
+                            styles.googleBtnText,
+                            { color: colors.background },
+                          ]}
+                        >
+                          ابدأ مع Google
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {error ? (
+                    <Text style={[styles.errorText, { color: colors.red }]}>
+                      {error}
+                    </Text>
+                  ) : null}
+                </>
               ) : (
                 <TouchableOpacity
                   onPress={goNext}
@@ -259,6 +212,7 @@ export default function Onboarding() {
                   </Text>
                 </TouchableOpacity>
               )}
+
               {!isLast && (
                 <TouchableOpacity onPress={skipToLast}>
                   <Text style={[styles.skip, { color: colors.textDim }]}>
@@ -270,180 +224,11 @@ export default function Onboarding() {
           </>
         )}
 
-        {step === "phone" && (
-          <View style={styles.authStep}>
-            <View style={styles.stepHeader}>
-              <Text style={[styles.stepIcon, { color: colors.gold }]}>📱</Text>
-              <Text style={[styles.stepTitle, { color: colors.text }]}>
-                رقم موبايلك؟
-              </Text>
-              <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
-                راح نبعتلك رسالة للتحقق من رقمك
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.phoneInputRow,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: phone ? colors.gold : colors.border,
-                },
-              ]}
-            >
-              <TextInput
-                style={[
-                  styles.phoneInput,
-                  { color: colors.text, fontFamily: Fonts.heading },
-                ]}
-                value={phone}
-                onChangeText={(t) => {
-                  setError("");
-                  setPhone(t.replace(/\D/g, ""));
-                }}
-                placeholder="7X XXX XXXX"
-                placeholderTextColor={colors.textDim}
-                keyboardType="phone-pad"
-                textAlign="right"
-                autoFocus
-              />
-              <View
-                style={[
-                  styles.prefixBox,
-                  { backgroundColor: colors.surfaceRaised },
-                ]}
-              >
-                <Text style={[styles.prefix, { color: colors.textMuted }]}>
-                  +962
-                </Text>
-              </View>
-            </View>
-
-            {error ? (
-              <Text style={[styles.errorText, { color: colors.red }]}>
-                {error}
-              </Text>
-            ) : null}
-
-            <TouchableOpacity
-              onPress={handleSendOTP}
-              disabled={loading || phone.length < 8}
-              style={[
-                styles.btn,
-                {
-                  backgroundColor:
-                    phone.length >= 8 ? colors.gold : colors.surfaceRaised,
-                  marginTop: 8,
-                },
-              ]}
-            >
-              {loading ? (
-                <ActivityIndicator color={colors.background} />
-              ) : (
-                <Text
-                  style={[
-                    styles.btnText,
-                    {
-                      color:
-                        phone.length >= 8 ? colors.background : colors.textDim,
-                    },
-                  ]}
-                >
-                  أرسل الكود
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {step === "otp" && (
-          <View style={styles.authStep}>
-            <View style={styles.stepHeader}>
-              <Text style={[styles.stepIcon, { color: colors.gold }]}>🔑</Text>
-              <Text style={[styles.stepTitle, { color: colors.text }]}>
-                الكود اللي وصلك
-              </Text>
-              <Text style={[styles.stepSubtitle, { color: colors.textMuted }]}>
-                أدخل الكود المكون من 6 أرقام
-              </Text>
-              <Text
-                style={[styles.phoneDisplay, { color: colors.gold }]}
-              >
-                {fullPhone}
-              </Text>
-            </View>
-
-            <View style={styles.otpRow}>
-              {otp.map((digit, i) => (
-                <TextInput
-                  key={i}
-                  ref={(r) => {
-                    otpRefs.current[i] = r;
-                  }}
-                  style={[
-                    styles.otpBox,
-                    {
-                      backgroundColor: colors.surface,
-                      color: colors.text,
-                      borderColor: digit ? colors.gold : colors.border,
-                      fontFamily: Fonts.mono,
-                    },
-                  ]}
-                  value={digit}
-                  onChangeText={(v) => handleOTPChange(v, i)}
-                  onKeyPress={({ nativeEvent }) =>
-                    handleOTPKeyPress(nativeEvent.key, i)
-                  }
-                  keyboardType="number-pad"
-                  maxLength={1}
-                  textAlign="center"
-                  autoFocus={i === 0}
-                  selectTextOnFocus
-                />
-              ))}
-            </View>
-
-            {loading && (
-              <ActivityIndicator
-                color={colors.gold}
-                style={{ marginTop: 16 }}
-              />
-            )}
-
-            {error ? (
-              <Text style={[styles.errorText, { color: colors.red }]}>
-                {error}
-              </Text>
-            ) : null}
-
-            <TouchableOpacity
-              onPress={handleResend}
-              style={{ marginTop: 16 }}
-            >
-              <Text style={[styles.skip, { color: colors.textMuted }]}>
-                ما وصلني الكود — أعد الإرسال
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => {
-                setStep("phone");
-                setOtp(["", "", "", "", "", ""]);
-                setError("");
-              }}
-              style={{ marginTop: 8 }}
-            >
-              <Text style={[styles.skip, { color: colors.textDim }]}>
-                تغيير الرقم
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
+        {/* ── Name step (shown for users without a name) ── */}
         {step === "name" && (
           <View style={styles.authStep}>
             <View style={styles.stepHeader}>
-              <Text style={[styles.stepIcon, { color: colors.gold }]}>✌️</Text>
+              <Text style={[styles.stepIcon]}>✌️</Text>
               <Text style={[styles.stepTitle, { color: colors.text }]}>
                 شو اسمك؟
               </Text>
@@ -463,17 +248,17 @@ export default function Onboarding() {
                 },
               ]}
               value={name}
-              onChangeText={(t) => setName(t)}
+              onChangeText={setName}
               placeholder="اسمك بالعربي"
               placeholderTextColor={colors.textDim}
               textAlign="right"
               returnKeyType="done"
-              onSubmitEditing={handleFinish}
+              onSubmitEditing={handleFinishName}
               autoFocus
             />
 
             <TouchableOpacity
-              onPress={handleFinish}
+              onPress={handleFinishName}
               disabled={loading || !name.trim()}
               style={[
                 styles.btn,
@@ -481,7 +266,6 @@ export default function Onboarding() {
                   backgroundColor: name.trim()
                     ? colors.gold
                     : colors.surfaceRaised,
-                  marginTop: 8,
                 },
               ]}
             >
@@ -491,9 +275,7 @@ export default function Onboarding() {
                 <Text
                   style={[
                     styles.btnText,
-                    {
-                      color: name.trim() ? colors.background : colors.textDim,
-                    },
+                    { color: name.trim() ? colors.background : colors.textDim },
                   ]}
                 >
                   ابدأ اللعب 🃏
@@ -508,9 +290,7 @@ export default function Onboarding() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   slide: {
     flex: 1,
     alignItems: "center",
@@ -571,11 +351,33 @@ const styles = StyleSheet.create({
     fontFamily: "Tajawal_400Regular",
     fontSize: 14,
   },
-  // ── Auth steps ──────────────────────────────────────────────────────────────
+  googleBtn: {
+    width: "100%",
+    height: 56,
+    borderRadius: 14,
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+  },
+  googleIcon: {
+    fontSize: 20,
+    fontFamily: "Cairo_700Bold",
+    color: "#0D0D1A",
+  },
+  googleBtnText: {
+    fontFamily: "Cairo_700Bold",
+    fontSize: 18,
+  },
+  errorText: {
+    fontFamily: "Tajawal_400Regular",
+    fontSize: 14,
+    textAlign: "center",
+  },
   authStep: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 40,
+    paddingTop: 60,
     gap: 16,
   },
   stepHeader: {
@@ -598,60 +400,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 24,
   },
-  phoneDisplay: {
-    fontFamily: "IBMPlexMono_400Regular",
-    fontSize: 14,
-    letterSpacing: 1,
-    marginTop: 4,
-  },
-  phoneInputRow: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    borderRadius: 16,
-    borderWidth: 1.5,
-    overflow: "hidden",
-    height: 58,
-  },
-  phoneInput: {
-    flex: 1,
-    height: "100%",
-    paddingHorizontal: 16,
-    fontSize: 18,
-  },
-  prefixBox: {
-    height: "100%",
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  prefix: {
-    fontFamily: "IBMPlexMono_400Regular",
-    fontSize: 15,
-  },
-  otpRow: {
-    flexDirection: "row-reverse",
-    justifyContent: "center",
-    gap: 10,
-    marginVertical: 8,
-  },
-  otpBox: {
-    width: 48,
-    height: 58,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    fontSize: 22,
-    textAlign: "center",
-  },
   nameInput: {
     height: 58,
     borderRadius: 16,
     paddingHorizontal: 16,
     fontSize: 17,
     borderWidth: 1.5,
-  },
-  errorText: {
-    fontFamily: "Tajawal_400Regular",
-    fontSize: 14,
-    textAlign: "center",
   },
 });
