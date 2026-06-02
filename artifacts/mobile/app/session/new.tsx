@@ -24,9 +24,11 @@ import { useColors } from "@/hooks/useColors";
 
 type SessionMode = "local" | "online";
 
-// local steps: mode(0) → game(1) → players(2) → settings(3)
-// online steps: mode(0) → game(1) → host-name(2) → settings(3)
+// local (non-team) steps: mode(0) → game(1) → players(2) → settings(3)
+// local (team) steps:     mode(0) → game(1) → players(2) → teams(3) → settings(4)
+// online steps:           mode(0) → game(1) → host-name(2) → settings(3)
 const LOCAL_STEP_LABELS = ["كيف تلعبون؟", "اختار اللعبة", "أضف اللاعبين", "اعدادات الجلسة"];
+const LOCAL_TEAM_STEP_LABELS = ["كيف تلعبون؟", "اختار اللعبة", "أضف اللاعبين", "اختار الفرق", "اعدادات الجلسة"];
 const ONLINE_STEP_LABELS = ["كيف تلعبون؟", "اختار اللعبة", "اسمك", "اعدادات الجلسة"];
 
 export default function NewSessionScreen() {
@@ -39,6 +41,8 @@ export default function NewSessionScreen() {
   const [mode, setMode] = useState<SessionMode | null>(null);
   const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
   const [players, setPlayers] = useState<string[]>(["", "", "", ""]);
+  // teamAssignment[i] = 0 → team A, 1 → team B (for team games)
+  const [teamAssignment, setTeamAssignment] = useState<number[]>([0, 0, 1, 1]);
   const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
   const [antiCheat, setAntiCheat] = useState(false);
@@ -47,7 +51,9 @@ export default function NewSessionScreen() {
   const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
-  const labels = mode === "online" ? ONLINE_STEP_LABELS : LOCAL_STEP_LABELS;
+  const isTeamLocalGame = mode === "local" && selectedGame?.isTeam === true;
+  const settingsStep = isTeamLocalGame ? 4 : 3;
+  const labels = mode === "online" ? ONLINE_STEP_LABELS : isTeamLocalGame ? LOCAL_TEAM_STEP_LABELS : LOCAL_STEP_LABELS;
 
   const canNext = (): boolean => {
     if (step === 0) return !!mode;
@@ -58,6 +64,13 @@ export default function NewSessionScreen() {
         players.filter((p) => p.trim().length > 0).length >=
         (selectedGame?.minPlayers ?? 2)
       );
+    }
+    // team assignment step
+    if (step === 3 && isTeamLocalGame) {
+      const filledPlayers = players.filter((p) => p.trim().length > 0);
+      const aCount = filledPlayers.filter((_, i) => teamAssignment[i] === 0).length;
+      const bCount = filledPlayers.filter((_, i) => teamAssignment[i] === 1).length;
+      return aCount >= 1 && bCount >= 1;
     }
     return true;
   };
@@ -74,6 +87,9 @@ export default function NewSessionScreen() {
     const count = Math.max(game.minPlayers, 2);
     setPlayers(Array.from({ length: count }, (_, i) => players[i] ?? ""));
     setTargetScore(game.defaultTarget);
+    // reset team assignment: first half → team A, second half → team B
+    const half = Math.ceil(count / 2);
+    setTeamAssignment(Array.from({ length: count }, (_, i) => (i < half ? 0 : 1)));
   };
 
   const addPlayer = () => {
@@ -110,12 +126,28 @@ export default function NewSessionScreen() {
   const handleStartLocal = () => {
     if (!selectedGame) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    const validPlayers = players
+
+    let rawPlayers = players
       .filter((_, i) => i < selectedGame.maxPlayers)
-      .map((n, i) => ({
-        id: generateId(),
-        name: n.trim() || `لاعب ${i + 1}`,
-      }));
+      .map((n, i) => ({ name: n.trim() || `لاعب ${i + 1}`, origIdx: i }));
+
+    // For team games, reorder so teamA at [0,2,...] and teamB at [1,3,...]
+    // ScoreEntryModal reads teamA = [players[0], players[2]], teamB = [players[1], players[3]]
+    if (selectedGame.isTeam) {
+      const teamA = rawPlayers.filter((_, i) => (teamAssignment[rawPlayers[i]?.origIdx ?? i] ?? 0) === 0);
+      const teamB = rawPlayers.filter((_, i) => (teamAssignment[rawPlayers[i]?.origIdx ?? i] ?? 0) === 1);
+      const maxLen = Math.max(teamA.length, teamB.length);
+      rawPlayers = [];
+      for (let i = 0; i < maxLen; i++) {
+        if (teamA[i]) rawPlayers.push(teamA[i]);
+        if (teamB[i]) rawPlayers.push(teamB[i]);
+      }
+    }
+
+    const validPlayers = rawPlayers.map((p) => ({
+      id: generateId(),
+      name: p.name,
+    }));
 
     const session: Session = {
       id: generateId(),
@@ -153,7 +185,7 @@ export default function NewSessionScreen() {
     }
   };
 
-  const isLastStep = step === 3;
+  const isLastStep = step === settingsStep;
   const handleConfirm = () => {
     if (mode === "local") handleStartLocal();
     else handleStartOnline();
@@ -174,7 +206,7 @@ export default function NewSessionScreen() {
           </Text>
           {step > 0 && (
             <View style={styles.stepDots}>
-              {[1, 2, 3].map((s) => (
+              {Array.from({ length: settingsStep }, (_, i) => i + 1).map((s) => (
                 <View
                   key={s}
                   style={[
@@ -408,8 +440,106 @@ export default function NewSessionScreen() {
           </KeyboardAwareScrollViewCompat>
         )}
 
-        {/* Step 3: Settings */}
-        {step === 3 && (
+        {/* Step 3: Team Assignment (team games only) */}
+        {step === 3 && isTeamLocalGame && (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
+          >
+            <Text style={[styles.fieldLabel, { color: colors.textMuted, marginBottom: 4 }]}>
+              اختار مين مع مين
+            </Text>
+            <Text style={[styles.fieldHint, { color: colors.textDim, marginBottom: 20 }]}>
+              اضغط على اسم اللاعب عشان تغير فريقه
+            </Text>
+
+            {/* Team columns */}
+            <View style={{ flexDirection: "row-reverse", gap: 12, marginBottom: 24 }}>
+              {[0, 1].map((teamIdx) => {
+                const teamColor = teamIdx === 0 ? colors.gold : "#7C9FF7";
+                const teamLabel = teamIdx === 0 ? "فريق أ ♠" : "فريق ب ♥";
+                const memberNames = players
+                  .map((n, i) => ({ name: n.trim() || `لاعب ${i + 1}`, idx: i }))
+                  .filter((_, arrIdx) => {
+                    const origIdx = arrIdx;
+                    return (teamAssignment[origIdx] ?? 0) === teamIdx;
+                  });
+                return (
+                  <View
+                    key={teamIdx}
+                    style={[
+                      styles.teamCol,
+                      { backgroundColor: colors.surface, borderColor: `${teamColor}44` },
+                    ]}
+                  >
+                    <View style={[styles.teamColHeader, { backgroundColor: `${teamColor}22` }]}>
+                      <Text style={[styles.teamColTitle, { color: teamColor }]}>{teamLabel}</Text>
+                      <Text style={[styles.teamColCount, { color: colors.textDim }]}>
+                        {memberNames.length} لاعبين
+                      </Text>
+                    </View>
+                    {memberNames.length === 0 ? (
+                      <Text style={[styles.teamEmptyHint, { color: colors.textDim }]}>
+                        لا يوجد لاعبين
+                      </Text>
+                    ) : (
+                      memberNames.map(({ name }) => (
+                        <View
+                          key={name}
+                          style={[styles.teamMemberChip, { backgroundColor: `${teamColor}15` }]}
+                        >
+                          <Text style={[styles.teamMemberName, { color: colors.text }]}>
+                            {name}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+
+            {/* Player toggle list */}
+            <Text style={[styles.fieldLabel, { color: colors.textMuted, marginBottom: 10 }]}>
+              اضغط للتبديل
+            </Text>
+            {players.map((name, i) => {
+              const filled = name.trim() || `لاعب ${i + 1}`;
+              const currentTeam = teamAssignment[i] ?? 0;
+              const teamColor = currentTeam === 0 ? colors.gold : "#7C9FF7";
+              const teamLabel = currentTeam === 0 ? "فريق أ ♠" : "فريق ب ♥";
+              return (
+                <TouchableOpacity
+                  key={i}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setTeamAssignment((prev) => {
+                      const next = [...prev];
+                      next[i] = prev[i] === 0 ? 1 : 0;
+                      return next;
+                    });
+                  }}
+                  style={[
+                    styles.playerTeamRow,
+                    {
+                      backgroundColor: colors.surface,
+                      borderColor: `${teamColor}55`,
+                    },
+                  ]}
+                >
+                  <View style={[styles.teamBadge, { backgroundColor: `${teamColor}22`, borderColor: teamColor }]}>
+                    <Text style={[styles.teamBadgeText, { color: teamColor }]}>{teamLabel}</Text>
+                  </View>
+                  <Text style={[styles.playerTeamName, { color: colors.text }]}>{filled}</Text>
+                  <Feather name="refresh-cw" size={14} color={colors.textDim} />
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {/* Step 3/4: Settings */}
+        {step === settingsStep && (
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.stepContent, { paddingBottom: 120 }]}
@@ -791,6 +921,18 @@ const styles = StyleSheet.create({
   },
   chip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   chipText: { fontFamily: Fonts.body, fontSize: 13 },
+  // Team assignment step
+  teamCol: { flex: 1, borderRadius: 16, borderWidth: 1.5, overflow: "hidden" },
+  teamColHeader: { paddingVertical: 10, paddingHorizontal: 12, alignItems: "center", gap: 2 },
+  teamColTitle: { fontFamily: Fonts.heading, fontSize: 16, textAlign: "center" },
+  teamColCount: { fontFamily: Fonts.body, fontSize: 11, textAlign: "center" },
+  teamEmptyHint: { fontFamily: Fonts.body, fontSize: 12, textAlign: "center", paddingVertical: 14 },
+  teamMemberChip: { marginHorizontal: 8, marginBottom: 6, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, alignItems: "center" },
+  teamMemberName: { fontFamily: Fonts.heading, fontSize: 14, textAlign: "center" },
+  playerTeamRow: { flexDirection: "row-reverse", alignItems: "center", borderRadius: 14, borderWidth: 1.5, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8, gap: 10 },
+  playerTeamName: { fontFamily: Fonts.heading, fontSize: 16, flex: 1, textAlign: "right" },
+  teamBadge: { borderRadius: 8, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4 },
+  teamBadgeText: { fontFamily: Fonts.body, fontSize: 12 },
   settingBlock: { gap: 10 },
   settingLabel: { fontFamily: Fonts.heading, fontSize: 18, textAlign: "right" },
   settingDesc: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right" },
