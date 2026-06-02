@@ -1,5 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useKeepAwake } from "expo-keep-awake";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -60,6 +61,17 @@ function checkOnlineWinner(session: OnlineSessionData): string | null {
   return winner?.id ?? null;
 }
 
+// ─── Levantine win phrases ────────────────────────────────────────────────────
+const WIN_PHRASES = [
+  "لطش يا زلمة 👑",
+  "هالمرة جت لك يا بطل 😎",
+  "ملك اللطش! يا شيخ يا أسطورة",
+  "فزت والباقي يبكوا 🏆",
+  "يا سلام يا قاتل ♛",
+  "هالشهر أنت الـ GOAT 👑",
+  "الله يبارك فيك يا بطل",
+];
+
 // ─── Code display boxes ──────────────────────────────────────────────────────
 function CodeDisplay({ code, colors }: { code: string; colors: any }) {
   return (
@@ -104,6 +116,9 @@ export default function SessionScreen() {
   const isOnline = !!(hostKey || playerId);
   const isHost = !!hostKey;
   const code = isOnline ? id : undefined;
+
+  // Mandatory: keep screen awake during active session
+  useKeepAwake();
 
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [showWinner, setShowWinner] = useState(false);
@@ -695,60 +710,51 @@ export default function SessionScreen() {
         onSubmit={handleAddRound}
       />
 
-      <Modal
-        visible={showWinner}
-        animationType="none"
-        transparent
-        statusBarTranslucent
-      >
+      <Modal visible={showWinner} animationType="none" transparent statusBarTranslucent>
         <View style={styles.winnerOverlay}>
           <ConfettiBurst active={showWinner} />
           <Animated.View
-            style={[
-              styles.winnerCard,
-              {
-                backgroundColor: colors.surfaceHigh,
-                borderColor: colors.gold,
-                transform: [
-                  {
-                    scale: winnerAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.5, 1],
-                    }),
-                  },
-                ],
-                opacity: winnerAnim,
-              },
-            ]}
+            style={[styles.winnerCard, {
+              backgroundColor: colors.surfaceHigh,
+              borderColor: colors.gold,
+              transform: [{ scale: winnerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }) }],
+              opacity: winnerAnim,
+            }]}
           >
-            <Text style={[styles.winnerCrown, { color: colors.gold }]}>♛</Text>
-            <Text style={[styles.winnerTitle, { color: colors.gold }]}>
+            <Text style={styles.winnerEmoji}>♛</Text>
+            <Text style={[styles.winnerName, { color: colors.gold }]}>
               {winnerPlayer?.name ?? "الفائز"}
             </Text>
-            <Text style={[styles.winnerSub, { color: colors.textMuted }]}>
-              فاز بعد {sessionRounds.length} جولة 🎉
+            <Text style={[styles.winnerMsg, { color: colors.gold }]}>
+              {WIN_PHRASES[sessionRounds.length % WIN_PHRASES.length]}
             </Text>
+            <View style={[styles.winnerStats, { backgroundColor: colors.surface }]}>
+              <View style={styles.winnerStatItem}>
+                <Text style={[styles.winnerStatVal, { color: colors.text, fontFamily: "IBMPlexMono_400Regular" }]}>
+                  {sessionRounds.length}
+                </Text>
+                <Text style={[styles.winnerStatLabel, { color: colors.textMuted }]}>جولة</Text>
+              </View>
+              <View style={[styles.winnerStatDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.winnerStatItem}>
+                <Text style={[styles.winnerStatVal, { color: colors.gold, fontFamily: "IBMPlexMono_400Regular" }]}>
+                  {scoredPlayers.find((p) => p.player.id === sessionWinnerId)?.total ?? 0}
+                </Text>
+                <Text style={[styles.winnerStatLabel, { color: colors.textMuted }]}>نقطة</Text>
+              </View>
+            </View>
             <View style={styles.winnerBtns}>
               <TouchableOpacity
-                onPress={() => {
-                  setShowWinner(false);
-                }}
+                onPress={() => setShowWinner(false)}
                 style={[styles.winnerSecBtn, { borderColor: colors.borderStrong }]}
               >
-                <Text style={[styles.winnerSecText, { color: colors.textMuted }]}>
-                  ابقَ هنا
-                </Text>
+                <Text style={[styles.winnerSecText, { color: colors.textMuted }]}>ابقَ هنا</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => {
-                  setShowWinner(false);
-                  router.back();
-                }}
-                style={[styles.winnerBtn, { backgroundColor: colors.gold }]}
+                onPress={() => { setShowWinner(false); router.replace("/(tabs)"); }}
+                style={[styles.winnerPrimaryBtn, { backgroundColor: colors.gold }]}
               >
-                <Text style={[styles.winnerBtnText, { color: colors.background }]}>
-                  الرئيسية
-                </Text>
+                <Text style={[styles.winnerPrimaryText, { color: colors.background }]}>🃏 جلسة جديدة</Text>
               </TouchableOpacity>
             </View>
           </Animated.View>
@@ -900,12 +906,17 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 340,
   },
-  winnerCrown: { fontSize: 56, textAlign: "center" },
-  winnerTitle: { fontFamily: Fonts.heading, fontSize: 32, textAlign: "center" },
-  winnerSub: { fontFamily: Fonts.body, fontSize: 16, textAlign: "center" },
+  winnerEmoji: { fontSize: 52, textAlign: "center" },
+  winnerName: { fontFamily: Fonts.heading, fontSize: 32, textAlign: "center" },
+  winnerMsg: { fontFamily: Fonts.body, fontSize: 15, textAlign: "center", lineHeight: 22 },
+  winnerStats: { flexDirection: "row", borderRadius: 16, overflow: "hidden", marginTop: 4 },
+  winnerStatItem: { flex: 1, paddingVertical: 14, alignItems: "center", gap: 4 },
+  winnerStatVal: { fontSize: 24 },
+  winnerStatLabel: { fontFamily: Fonts.body, fontSize: 12 },
+  winnerStatDivider: { width: 1 },
   winnerBtns: { flexDirection: "row", gap: 10, marginTop: 8, width: "100%" },
-  winnerBtn: { flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  winnerBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
+  winnerPrimaryBtn: { flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  winnerPrimaryText: { fontFamily: Fonts.heading, fontSize: 17 },
   winnerSecBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   winnerSecText: { fontFamily: Fonts.heading, fontSize: 15 },
 });

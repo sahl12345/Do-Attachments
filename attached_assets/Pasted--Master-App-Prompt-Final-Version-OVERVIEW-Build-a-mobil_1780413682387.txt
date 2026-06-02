@@ -1,0 +1,817 @@
+# 🃏 تعليلة شدة — Master App Prompt (Final Version)
+
+-----
+
+## OVERVIEW
+
+Build a mobile-first Arabic card game **session tracker** called **“تعليلة شدة”**.
+This is NOT an online card game. Friends sit together physically, play cards, and use this app to:
+
+- Track scores in real-time (no paper, no cheating)
+- Build history and stats with their crew over months
+- Compete for bragging rights with Jordanian humor baked in
+
+**Target users:** Groups of 2–6 friends in cafés and homes in Jordan and the Levant.
+**Core problem:** Paper score tracking = cheating, disputes, forgotten history.
+**Platform:** Mobile ONLY. iOS + Android. Base width: 390px. No desktop layout, ever.
+**Language:** Arabic throughout. Levantine dialect (Jordanian). RTL layout on every screen.
+**Theme:** Dark only. No light mode in MVP.
+
+-----
+
+## TECH STACK
+
+|Layer    |Choice                                                                   |
+|---------|-------------------------------------------------------------------------|
+|Frontend |React Native (Expo)                                                      |
+|Backend  |Supabase (Postgres + Realtime + Storage)                                 |
+|Auth     |Google OAuth via Supabase — NO phone OTP, NO email OTP, Google login only|
+|Real-time|Supabase Realtime channels                                               |
+|State    |Zustand                                                                  |
+|Offline  |WatermelonDB or MMKV for local cache + sync queue                        |
+|Push     |Expo Notifications + Supabase Edge Functions                             |
+|Fonts    |Cairo Bold (headings) + Tajawal (body) + IBM Plex Mono (scores)          |
+
+-----
+
+## DESIGN SYSTEM
+
+### Color Palette
+
+```
+Background:     #0D0D1A   (near-black — deep night)
+Surface:        #1A1A2E   (card table dark navy)
+Surface Raised: #16213E   (elevated cards)
+Surface High:   #0F3460   (modals, sheets)
+Gold Accent:    #C9A84C   (wins, crowns, highlights)
+Red Accent:     #E94560   (losses, alerts, negative scores)
+Text Primary:   #EAEAEA
+Text Muted:     #8892A4
+Text Dim:       #4A5568
+Success:        #2ECC71
+Warning:        #F39C12
+Border:         rgba(255,255,255,0.07)
+```
+
+### Typography
+
+- **Cairo Bold** — all headings, player names, scores
+- **Tajawal Regular** — body text, descriptions, labels
+- **IBM Plex Mono** — score numbers ONLY (monospaced for alignment)
+
+### Spacing & Sizing
+
+- Base unit: 8px
+- Minimum tap target: 56px height, 48px width
+- Bottom safe zone padding: 34px (iPhone home bar)
+- Screen horizontal padding: 16px
+
+### Motion & Haptics
+
+- Score update: spring animation (stiffness 200, damping 15) — bounces in
+- Win celebration: confetti burst (gold + red particles) + heavy haptic
+- Trick taken: scale 0.95 → 1.05 → 1.0 + light haptic
+- Screen transitions: slide from right (RTL-aware, 280ms ease-out)
+- Bottom sheet: spring slide up
+- Button press: scale(0.96) 80ms
+- Number change: count-up animation (not instant swap)
+- Disputed score: red flash + medium haptic
+
+### Component Rules
+
+- Cards: border-radius 16px, border 1px rgba(255,255,255,0.07), no shadows (use elevation via color)
+- Buttons primary: full-width, 56px height, border-radius 14px, Cairo Bold
+- Bottom navigation: 5 tabs, 60px height, Arabic labels only
+- ALL layouts: direction RTL, text-align right
+- Score grid: always 2×2 or 1×4, IBM Plex Mono, large (32–48px)
+
+-----
+
+## GAMES LIST (كل الألعاب)
+
+Each game card shows: name, player count badge, difficulty dots, score system tag.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ اللعبة           │ لاعبين │ صعوبة  │ نظام النقاط       │
+├─────────────────────────────────────────────────────────┤
+│ طرنيب عادي       │   4    │  ★★★   │ لطشات + طلبة      │
+│ طرنيب سوري ٤١    │   4    │  ★★★   │ لطشات + طلبة      │
+│ ٤٠٠ (أربعمية)    │   4    │  ★★★★  │ نقاط فردية        │
+│ تركس فردي        │   4    │  ★★★★  │ ممالك + عقود      │
+│ تركس شراكة       │   4    │  ★★★★  │ ممالك + فرق       │
+│ تركس كومبلكس     │   4    │  ★★★★★ │ ممالك + كومبلكس   │
+│ هاند / كنكان     │  2-6   │  ★★★   │ أقل نقاط يفوز     │
+│ بلوت             │   4    │  ★★★★  │ سن + حكم + لطشات  │
+│ بصرة             │  2-4   │  ★★    │ التقاط + بصرة     │
+│ ليخة             │   4    │  ★★★   │ أقل نقاط يفوز     │
+│ دومينو           │  2-4   │  ★★    │ نقاط الأحجار      │
+│ جاكارو عادي      │   4    │  ★★★   │ فريق يفوز         │
+│ جاكارو كومبلكس   │   4    │  ★★★★★ │ فريق يفوز         │
+│ حريقة            │   4    │  ★★★   │ نقاط خاصة         │
+│ نذالة            │   4    │  ★★    │ نقاط خاصة         │
+└─────────────────────────────────────────────────────────┘
+```
+
+-----
+
+## GAME SCORING RULES (قواعد حساب النقاط — دقيقة 100%)
+
+### 🃏 طرنيب عادي (Tarneeb)
+
+- 4 players, 2 teams, 52 cards, 13 cards each
+- Bidding team picks trump suit
+- If bid met: +tricks taken to score
+- If bid failed: -(bid amount), opponent +their tricks
+- كبوت (13-0) without bidding: +16 | with bid: +26 | failed bid 13: -16
+- Game ends at: 31 / 41 / 61 (CUSTOMIZABLE per session)
+
+### 🃏 طرنيب سوري ٤١
+
+- Same as طرنيب عادي BUT:
+- Trump = OPPOSITE color of last dealt card (red last card → black trump)
+- Game ends at 41 (default), customizable
+
+### 🃏 ٤٠٠ (أربعمية)
+
+- 4 players, each bids individually (not teams)
+- Points per successful bid based on bid amount
+- Special rules when player approaches 30–39 pts (min bid increases)
+- Target: reach 41 points first
+- Customizable target: 41 / 51
+
+### 👑 تركس (كل الأنواع)
+
+Structure: 4 players each has a “مملكة” (kingdom) = 5 contracts in any order they choose.
+Owner decides the order of their 5 contracts.
+
+**Contract scoring:**
+
+|العقد    |النقاط                                         |
+|---------|-----------------------------------------------|
+|لطوش     |-15 per trick taken                            |
+|ديناري   |-10 per diamond card taken                     |
+|بنات     |-25 per queen taken                            |
+|شيخ الكبة|-75 if you take king of spades                 |
+|تركس     |+200 first, +150 second, +100 third, +50 fourth|
+
+**تدبيل (Doubling):** Player reveals dangerous card → penalty doubles. Revealer gets +original value bonus.
+
+**تركس شراكة:** Same rules, partners (across players) combine scores.
+
+**تركس كومبلكس:** Each مملكة has only 2 contracts: تركس + كومبلكس.
+كومبلكس = all other contracts combined into one round.
+
+### 🃏 هاند / كنكان (Hand/Concan)
+
+- 2-6 players, 2 decks + 2 jokers (106 cards)
+- Goal: first to empty hand by forming sets (3-4 same rank) or sequences (3+ same suit)
+- Minimum to start laying down: 51 points worth of cards
+- Winner: -30 pts (or -60 for “هاند” — entire hand laid at once)
+- Losers who laid cards: +value of remaining cards (Ace=11, Joker=15, pictures=10)
+- Losers who laid NOTHING: +100 penalty
+- If هاند: all penalties double
+- Player eliminated at 101+ points
+
+### 🃏 بلوت (Baloot)
+
+- 4 players, 2 teams, 32 cards (7 to Ace)
+- Bidding: “سن” or “حكم”
+- Points per round from cards won
+- Bonus for declared sequences (سلسلة) and sets
+- Last trick: +10 bonus
+- Game ends at 152 points or “قهوة” (landslide win)
+
+### 🃏 بصرة (Basra)
+
+- 2 players (or 4 in teams)
+- Deal: 6 cards each + 4 face-up on table. Redeal 6 when empty.
+- Jack captures ALL table cards
+- **بصرة:** clear table WITHOUT Jack = +10 bonus per بصرة
+- Scoring per round:
+  - 27+ cards: +30 | Each Ace: +1 | Each Jack: +1
+  - 2 of Clubs: +2 | 10 of Diamonds: +3 | Each بصرة: +10
+- Game ends at 121 (or 101, customizable)
+
+### 🃏 ليخة (Leekha — Hearts variant)
+
+- 4 players, LOWEST score wins
+- Avoid: Queen of Spades (بنت سباتي) = +13 | 10 of Diamonds = +10 | Each heart = +1
+- “Shoot the Moon”: take ALL hearts + Queen of Spades → you get 0, others +26
+- Game ends when any player hits 101+ → lowest score wins
+
+### 🎲 دومينو (Domino)
+
+- 2 or 4 players (teams of 2)
+- 28 tiles (0-0 to 6-6), 7 tiles each, rest in draw pile
+- Start: double-6. Match ends to extend chain.
+- Round ends: player empties tiles OR table blocked (“انسدت الطاولة”)
+- Winner gets sum of all remaining tiles in opponents’ hands
+- Game ends at 100 or 200 (customizable)
+
+### 🎯 جاكارو (Jackaroo)
+
+- 4 players, 2 teams (partners across)
+- Physical board — app tracks wins/losses + shows card cheat sheet
+- Card reference (shown in-app):
+  - Ace: exit Home OR 1/11 steps | King: exit Home
+  - Queen: 12 steps | Jack: swap with opponent marble
+  - 7: split between 2 marbles | 4: move backwards
+  - Others: face value steps forward
+- Win condition: all 8 team marbles in Safe Zone
+- كومبلكس variant: adds killing rules (toggle in session settings)
+
+-----
+
+## APP SCREENS — DETAILED
+
+### SCREEN 1: Splash + Onboarding
+
+- Logo animation: playing card flips to reveal “تعليلة شدة” in Cairo Bold
+- 3 swipeable slides (skippable):
+1. “جلستك، قوانينك” — Your session, your rules
+1. “لا غش، لا خلافات” — No cheating, no disputes
+1. “سجّل تاريخك مع الشلة” — Your history with the crew
+- Login screen: single large button “تسجيل الدخول بـ Google 🔵” — no phone input, no email input, Google OAuth only via Supabase
+
+-----
+
+### SCREEN 2: Home
+
+```
+┌─────────────────────────────┐
+│  أهلاً [اسم] 👋        🔔  │
+│  ━━━━━━━━━━━━━━━━━━━━━━━━  │
+│  ┌─────────────────────┐   │
+│  │  ➕ جلسة جديدة      │   │  ← Primary CTA, gold
+│  └─────────────────────┘   │
+│  ┌─────────────────────┐   │
+│  │  🔑 انضم بكود       │   │  ← Secondary
+│  └─────────────────────┘   │
+│                             │
+│  جلساتك الأخيرة            │
+│  ┌──────────────────────┐  │
+│  │ طرنيب • أمس • فزت 🏆│  │
+│  │ تركس • الجمعة • خسرت│  │
+│  └──────────────────────┘  │
+│                             │
+│  إحصائياتك هالشهر          │
+│  ٦٠٪ فوز │ ١٢ جلسة │ 🥇   │
+└─────────────────────────────┘
+```
+
+-----
+
+### SCREEN 3: Create Session (Step-by-step, single scrollable screen)
+
+**Step 1 — اختار اللعبة**
+
+- Horizontal scroll of game cards (2 rows)
+- Each card: game name (large) + player count badge + difficulty dots
+- Selected card: gold border + checkmark
+
+**Step 2 — إعدادات الجلسة**
+
+- Session name (optional): placeholder “جلسة القهوة ☕”
+- Target score toggle: 31 / 41 / 61 (for طرنيب) — different cafés, different rules
+- Game variant sub-option (appears only when relevant):
+  - طرنيب: عادي / سوري ٤١
+  - تركس: فردي / شراكة / كومبلكس
+  - جاكارو: عادي / كومبلكس
+- Rounds alternative: toggle “عدد جولات” instead of score target
+- Anti-cheat toggle: “كل لاعب يؤكد النتيجة 🛡️”
+- Anti-cheat timeout (shown only when anti-cheat ON): 10 ثواني / 30 ثانية / يدوي (بدون مؤقت)
+- Debt tracker toggle: “حاسبة الديون 💸”
+
+**Step 3 — ادعو اللاعبين**
+
+- Session code: huge, bold, centered (e.g. **SH-4829**)
+- WhatsApp share button (pre-filled: “انضم لجلسة تعليلة شدة، الكود: SH-4829”)
+- Live list of joined players (real-time, names appear as they join)
+- “ابدأ اللعبة” button — activates when minimum players joined, gold color
+
+-----
+
+### SCREEN 4: Active Session ⭐ MOST IMPORTANT SCREEN
+
+This screen must work perfectly with one thumb, glanceable in 1 second between tricks.
+
+**Full Layout:**
+
+```
+┌─────────────────────────────────┐
+│ ← طرنيب   جولة ٣/١٠    ⚙️ 🚪  │  ← sticky header, 52px
+│─────────────────────────────────│
+│                                 │
+│  SCOREBOARD (fills ~40% screen) │
+│  ┌─────────────┬─────────────┐  │
+│  │    سهل      │   محمد      │  │
+│  │   47 نقطة  │  23 نقطة   │  │
+│  │     🏆      │             │  │
+│  ├─────────────┼─────────────┤  │
+│  │   خالد      │  عبدالله    │  │
+│  │   31 نقطة  │  15 نقطة   │  │
+│  └─────────────┴─────────────┘  │
+│                                 │
+│  ── الجولة الحالية ──           │
+│  الطلبة: ٨   اللطشات: ٥/٨     │
+│  [▓▓▓▓▓░░░] ← progress bar     │
+│                                 │
+│─────────────────────────────────│
+│                                 │  ← THUMB ZONE starts here
+│  ┌───────────────────────────┐  │
+│  │   📝 سجّل لطشة           │  │  ← PRIMARY button, 64px tall, gold
+│  └───────────────────────────┘  │
+│                                 │
+│  [📜 تاريخ الجولات] [📊 إحصاء] │  ← secondary actions
+│                                 │
+│  [🔊] [↩️ تراجع]               │  ← sound + undo last entry
+└─────────────────────────────────┘
+      ↑ bottom safe zone padding
+```
+
+**“سجّل لطشة” Bottom Sheet (slides up on tap):**
+
+- Sheet height: 60% of screen
+- Header: “مين أخذ اللطشة؟” in Cairo Bold 22px
+- Player buttons: 2×2 grid, each 80px tall, player name + current score
+- Tapping a player = records trick for them instantly
+- Spring animation on score update
+- If anti-cheat ON: sheet stays open showing “مستنيين تأكيد…” with countdown
+
+**For تركس — Bottom Sheet shows contracts first:**
+
+```
+اختار العقد:
+[لطوش -15] [ديناري -10] [بنات -25] [شيخ الكبة -75] [تركس +200]
+← then → مين أخذ؟
+```
+
+**Score History Drawer:**
+
+- Swipe up from bottom of scoreboard to reveal
+- Timeline of all rounds: “جولة ١: سهل +٣، محمد -١…”
+- Tap any round to see details
+- “تراجع” button on last round only
+
+**Undo System:**
+
+- Last action can be undone within 30 seconds
+- “↩️ تراجع” button visible for 30s after each entry
+- After 30s: grayed out (permanent)
+
+**Voice Input: REMOVED**
+Reason: Jordanian cafés are high-noise environments (nargileh, crowds, music). Arabic dialect speech recognition in noisy environments is unreliable and would frustrate users. All input is tap-only.
+
+**Keep Awake (منع قفل الشاشة) — CRITICAL:**
+
+- Activate `expo-keep-awake` (or equivalent) immediately when Active Session screen mounts
+- Deactivate when user leaves Active Session screen (end session, background, navigate away)
+- This is mandatory — players may not touch their phone for several minutes during actual play
+- Show subtle “🔆 الشاشة نشطة” indicator in header corner so user knows it’s working
+
+**Sound Effects (toggleable, default OFF):**
+
+- Trick taken: short card slap sound
+- كبوت: crowd roar + “كبوووت يا حيوان!” voice clip
+- Win: celebration sound
+- Disputed: buzzer sound
+
+-----
+
+### SCREEN 5: End of Session 🎉
+
+- Full-screen confetti (gold + red, 3 seconds)
+- Heavy haptic pulse
+- Winner card: crown icon + “بطل الجلسة” + player name
+- Stats breakdown:
+  - ملك اللطش: [name] — X لطشة
+  - أكثر واحد خسر: [name] 😂
+  - الجولة الأطول: X دقيقة
+- Debt summary (if enabled): “محمد لازم يدفع ٣ دنانير لسهل 💸”
+- Buttons: “جلسة جديدة 🃏” | “ارجع للبيت”
+- Auto-save to history (works offline too)
+
+-----
+
+### SCREEN 6: Profile + Stats
+
+**My Numbers:**
+
+- Win rate gauge (circular, gold fill)
+- Favorite game (most played)
+- Best streak (consecutive wins with fire emoji)
+- Total sessions | Total لطشات | Total wins
+
+**Rank System:**
+
+```
+🥉 مبتدئ        0–10 sessions
+🥈 لاعب         11–30 sessions
+🥇 محترف        31–60 sessions
+💎 أسطورة       61+ sessions
+👑 شيخ الجلسة   Top 5% win rate this month
+```
+
+**Titles (auto-earned, shown on profile):**
+
+```
+👑 ملك اللطش         — most tricks all-time
+🔥 الثنائي المرعب    — best duo win rate (with specific partner)
+🐐 الـ GOAT          — highest win rate this month
+😂 ملك الخسارة       — most losses this month
+💀 يا وحش            — 5 wins in a row
+💸 خسران بس بشرف     — lost most but always comes back
+🎯 دقيق              — always meets bid exactly (طرنيب)
+😱 بتشك فيه          — disputed score 3+ times
+```
+
+**Achievements (Badges):**
+
+- “أول جلسة” — played first session
+- “١٠ جلسات” — 10 sessions played
+- “كبوت!” — won by كبوت
+- “بصرة مزدوجة” — 2 بصرات in one game
+- “بدون غش” — 10 sessions with anti-cheat enabled
+- “الشلة الوفية” — played with same 3 people 10+ times
+
+-----
+
+### SCREEN 7: الشلة (Crew)
+
+- List of everyone you’ve played with
+- Per person: W/L record, favorite game together, last played
+- “سهل فاز عليك ١٢ مرة وخسر ٤ — ثأر منه 😤”
+- Monthly mini-leaderboard within your crew
+- “تحدّاه” button → opens new session invite
+
+-----
+
+### SCREEN 8: History
+
+- All past sessions, newest first
+- Filter: by game / by player / by date
+- Each row: game name + players + winner + date + duration
+- Tap → full round-by-round replay
+- Search bar (by player name)
+
+-----
+
+## OFFLINE MODE (مهم جداً)
+
+- All score recording works 100% offline
+- Local DB (MMKV or WatermelonDB) stores every event
+- Sync queue: when internet returns, syncs automatically in background
+- “غير متصل 🔴” indicator in header when offline
+- “تمت المزامنة ✅” toast when sync completes
+- Conflict resolution: last-write-wins per round (timestamp-based)
+- Anti-cheat: disabled automatically when offline (needs all players connected)
+
+-----
+
+## ANTI-CHEAT SYSTEM (محسّن)
+
+When enabled:
+
+1. Recorder taps player who took trick
+1. Bottom sheet shows: “تأكيد اللطشة — ثواني [X]” with countdown bar
+1. All OTHER players get push notification instantly
+1. Players tap ✅ (صح) or ❌ (غلط) from notification or app
+1. **Fast path:** Majority confirms → auto-records + green flash
+1. **Dispute path:** Any player taps ❌ → red flash + message
+1. **Timeout path:** Timer expires → auto-confirms (majority wins)
+
+**Timeout options (set in session settings before starting):**
+
+- **١٠ ثواني** — default, fast-paced sessions
+- **٣٠ ثانية** — relaxed sessions, players not always watching phone
+- **يدوي** — no timer, each player must manually confirm, session host can force-confirm after 60s
+
+**Dispute messages (random):**
+
+- “في خلاف! ناقشوا مع بعض 😂”
+- “مين اللي بيغش هون؟ 👀”
+- “بتشك فيك والله يا [name]”
+- “يا زلمة اتفقوا! 😤”
+- “حكّموا الكبير بينكم”
+- “هاد الكلام ما بنتهي 😂”
+
+-----
+
+## LEVANTINE UI COPY — COMPLETE
+
+All phrases rotate randomly. Use Cairo Bold for impact words.
+
+**كبوت / فوز ساحق:**
+
+- “كبوووت يا حيوان 🔥”
+- “سحقتمونا يا مجرمين!”
+- “هذا مو فوز.. هذا إعدام 💀”
+- “١٣-٠ يا وحش”
+- “ذبحتونا والله”
+- “فزتوا علينا مذبحة”
+- “أنتم مو بشر والله”
+- “انتهت القهوة علينا”
+- “انزل من الكبوت يا ولد”
+
+**فوز عادي:**
+
+- “لطش يا زلمة 👑”
+- “ملك اللطش!”
+- “يا شيخ يا أسطورة”
+- “هالمرة جت لنا 😎”
+- “فزنا والباقي يبكوا”
+- “الله يبارك فيك يا بطل”
+- “يا سلام يا قاتل”
+- “هالمرة جت لنا”
+
+**خسارة:**
+
+- “يا خسارة يا زلمة 😂”
+- “راحت علينا القهوة”
+- “خسرنا وانبسطنا 💸”
+- “الله ياخذ الشدة”
+- “خسران بس بشرف”
+- “يا حرام.. كان فيها”
+- “بدك تدريب يا معلم”
+- “حظي أسود والله”
+- “اشتغل على حالك”
+- “إذا مش قد الشدة لا تجي تلعب”
+
+**لطشة واحدة:**
+
+- “هاللطش تاريخي 🎯”
+- “لطش يا زلمة”
+- “واحدة واحدة يا بطل”
+- “اللطش الجاي بنذبحكم ⚔️”
+
+**نهاية الجلسة:**
+
+- للفائز: “هالشهر أنت الـ GOAT 👑”
+- للخاسر: “ملك الخسارة 😂 بكرا أحسن إن شاء الله”
+- للكل: “ضحكنا وخسرنا.. أحلى شي”
+- “قهوة + شدة = حياة ☕🃏”
+- “يا زلمة أحلى جلسة”
+
+**إحصائيات:**
+
+- “[اسم] فاز عليك ١٥ مرة هالشهر يا مسكين 😂”
+- “أنت أكثر واحد بتاكل لطوش”
+- “أنت و[اسم] ثنائي مرعب 🔥”
+- “هالشهر أنت الـ GOAT”
+- “دايماً تخسر وبتحرق 🔥😂”
+- “شريكك حمار باللعب 😂” (shown jokingly on losing streak with same partner)
+
+**Anti-cheat:**
+
+- “مين اللي بيغش اليوم؟ 👀”
+- “بتشك فيك والله”
+- “في واحد شكاك؟ ناقشوا مع بعض 😂”
+- “يا رجل أنت عبقري” (sarcastic, on repeated disputes)
+
+**Overbidding (طرنيب):**
+
+- “طالب كثير يا زلمة 😂”
+- “يا رجل أنت واثق من حالك؟”
+- “بتشك فيك والله على هالطلبة”
+
+**Waiting / Idle:**
+
+- “يلا اللعب! مستنيينك يا زلمة”
+- “شو بدكم تلعبوا هاللي؟”
+- “انضموا قبل ما ننام 😴”
+
+**Session start:**
+
+- “يلا نبدأ! بسم الله 🃏”
+- “يا كبوت يا بلاش تلعب”
+- “الله يعين الخاسرين 😂”
+
+**Empty states:**
+
+- “لسا ما لعبتوا — يلا افتحوا جلسة!”
+- “ما في جلسات هالشهر؟ وين رحتوا؟ 😂”
+- “الشلة ما اجتمعت — وين كل واحد؟”
+
+-----
+
+## DEBT TRACKER (حاسبة الديون)
+
+When enabled in session settings:
+
+- Before session: set stakes per point (e.g. 0.10 JOD per point difference)
+- OR fixed amount per game (e.g. 1 JOD per lost game)
+- End of session: auto-calculate who owes whom
+- Display: “محمد يدفع ٣.٥٠ دينار لسهل 💸”
+- Settlement: tap “تم الدفع ✅” to clear debt
+- History: all debts tracked per person
+- Running balance: “محمد عليه ١٢ دينار من آخر شهر” 😂
+
+-----
+
+## MONETIZATION
+
+### Free Tier (الكل يستخدمه)
+
+- Up to 3 active crews
+- Last 20 sessions history
+- Basic stats (win rate, total sessions)
+- All games supported
+- Ad banner (bottom of home screen only — not during active session)
+
+### Pro Tier — “شيخ الجلسة” (2.99 JOD/month or 24.99 JOD/year)
+
+- Unlimited crews + history
+- Advanced stats (trends, heatmaps, per-game breakdown)
+- Custom themes (dark green felt, dark red, dark wood)
+- Custom titles and avatar frames
+- Sound pack (extra sounds + voice clips)
+- No ads
+- Priority support
+
+### Café Partnerships (Phase 3)
+
+- Café gets branded theme in app (“جلسة مقهى الرشيد”)
+- QR code at café → auto-joins café leaderboard
+- Monthly “بطل المقهى” leaderboard displayed on café TV/screen
+- Café pays flat monthly fee (15–30 JOD/month)
+
+-----
+
+## DATABASE SCHEMA (Supabase)
+
+```sql
+users (
+  id uuid PK,
+  phone text UNIQUE,
+  display_name text,
+  avatar_url text,
+  is_pro boolean DEFAULT false,
+  pro_expires_at timestamp,
+  created_at timestamp
+)
+
+sessions (
+  id uuid PK,
+  code text UNIQUE,          -- "SH-4829"
+  game_type text,            -- 'tarneeb' | 'trix' | 'hand' | etc
+  game_variant text,         -- 'normal' | 'syrian41' | 'complex' | etc
+  status text,               -- 'waiting' | 'active' | 'finished'
+  settings jsonb,            -- {target_score, anti_cheat, debt_tracker, voice_input, rounds}
+  created_by uuid REFERENCES users,
+  started_at timestamp,
+  ended_at timestamp
+)
+
+session_players (
+  id uuid PK,
+  session_id uuid REFERENCES sessions,
+  user_id uuid REFERENCES users,
+  display_name text,
+  team text,                 -- 'A' | 'B' | null
+  final_score integer,
+  final_rank integer,
+  joined_at timestamp
+)
+
+rounds (
+  id uuid PK,
+  session_id uuid REFERENCES sessions,
+  round_number integer,
+  round_data jsonb,          -- flexible per game type
+  recorded_by uuid REFERENCES users,
+  confirmed_by uuid[],
+  disputed boolean DEFAULT false,
+  created_at timestamp,
+  synced_at timestamp        -- for offline sync
+)
+
+score_events (
+  id uuid PK,
+  session_id uuid REFERENCES sessions,
+  player_id uuid REFERENCES session_players,
+  round_id uuid REFERENCES rounds,
+  points integer,
+  event_type text,
+  metadata jsonb,
+  local_id text,             -- for offline dedup
+  created_at timestamp
+)
+
+debts (
+  id uuid PK,
+  session_id uuid REFERENCES sessions,
+  from_user uuid REFERENCES users,
+  to_user uuid REFERENCES users,
+  amount decimal,
+  currency text DEFAULT 'JOD',
+  settled boolean DEFAULT false,
+  settled_at timestamp
+)
+
+player_stats (
+  user_id uuid REFERENCES users,
+  game_type text,
+  total_sessions integer DEFAULT 0,
+  wins integer DEFAULT 0,
+  total_tricks integer DEFAULT 0,
+  current_streak integer DEFAULT 0,
+  best_streak integer DEFAULT 0,
+  updated_at timestamp,
+  PRIMARY KEY (user_id, game_type)
+)
+
+friendships (
+  user_a uuid REFERENCES users,
+  user_b uuid REFERENCES users,
+  sessions_together integer DEFAULT 0,
+  user_a_wins integer DEFAULT 0,
+  user_b_wins integer DEFAULT 0,
+  PRIMARY KEY (user_a, user_b)
+)
+```
+
+-----
+
+## REAL-TIME EVENTS (Supabase Realtime)
+
+Channel: `session:{session_id}`
+
+|Event                   |Trigger            |Action                       |
+|------------------------|-------------------|-----------------------------|
+|`player_joined`         |New player joins   |Update lobby list            |
+|`game_started`          |Host starts        |Navigate all to active screen|
+|`trick_recorded`        |Trick logged       |Animate score update         |
+|`confirmation_requested`|Anti-cheat trigger |Show confirm modal           |
+|`trick_confirmed`       |Majority approves  |Lock + show next             |
+|`trick_disputed`        |Someone rejects    |Red flash + message          |
+|`game_ended`            |Win condition met  |Navigate to results          |
+|`player_disconnected`   |Player goes offline|Show “غير متصل” badge        |
+
+-----
+
+## PUSH NOTIFICATIONS
+
+- Anti-cheat confirmation (highest priority — delivered in <2s)
+- “انضم لاعب جديد: محمد 👋”
+- “الجلسة بدأت! يلا 🃏”
+- “دورك تختار الطلبة” (تركس)
+- Weekly nudge: “ما لعبتوا هالأسبوع — وين الشلة؟ 😂”
+- Debt reminder: “محمد لسا ما دفع 💸”
+
+-----
+
+## MVP SCOPE
+
+### Phase 1 — MVP (build this first)
+
+- [ ] Google OAuth auth (via Supabase — single button login, NO phone OTP)
+- [ ] Create / join session with code
+- [ ] طرنيب (عادي + سوري ٤١) scoring
+- [ ] تركس (كل الأنواع) scoring
+- [ ] هاند / كنكان scoring
+- [ ] Real-time score sync (Supabase Realtime)
+- [ ] Basic offline support (MMKV local cache)
+- [ ] End of session summary
+- [ ] Basic profile + win/loss stats
+- [ ] Undo last entry
+
+### Phase 2
+
+- [ ] All remaining games (بلوت، بصرة، ليخة، دومينو، جاكارو)
+- [ ] Anti-cheat system
+- [ ] Crew / friends system + stats
+- [ ] Full history with replay
+- [ ] Rank + titles + achievements
+- [ ] Debt tracker
+- [ ] Monetization (Pro tier)
+
+### Phase 3
+
+- [ ] Sound effects pack
+- [ ] Café partnership features
+- [ ] Monthly leaderboards
+- [ ] Session challenges between crews
+
+-----
+
+## CRITICAL RULES FOR AI BUILDER
+
+1. **RTL FIRST:** Every layout RTL. Every text right-aligned. Test all screens mirrored.
+1. **MOBILE ONLY:** No responsive desktop. One-thumb use. All primary actions bottom 60% of screen.
+1. **REAL-TIME IS CORE:** Active session screen must update for all players in <500ms.
+1. **GAME LOGIC IS EXACT:** Scoring rules must match specifications above perfectly. Zero approximation.
+1. **LEVANTINE COPY:** Never فصحى. Never English in UI. Jordanian dialect only as specified.
+1. **OFFLINE FIRST:** Score recording must work with zero connectivity. Sync later.
+1. **DARK ONLY:** #0D0D1A background. No light mode toggle in MVP.
+1. **UNDO IS SACRED:** Always allow undoing the last entry within 30 seconds.
+1. **NEVER block the active session screen** with ads, prompts, or pop-ups.
+1. **Sound + haptics are opt-in**, never forced. Default: haptics ON, sounds OFF.
+1. **KEEP AWAKE IS MANDATORY:** Use `expo-keep-awake` on Active Session screen. Players don’t touch phone for minutes during play. Screen must never auto-lock during an active session.
+1. **NO VOICE INPUT:** Removed permanently. Jordanian cafés are too noisy for reliable Arabic dialect speech recognition. All input is tap-only.
+1. **GOOGLE LOGIN ONLY:** Auth is Google OAuth via Supabase. NEVER implement phone OTP, SMS verification, or email OTP. Login screen = one button only: “تسجيل الدخول بـ Google”. Use `supabase.auth.signInWithOAuth({ provider: 'google' })`.
+1. **CHECKPOINT BEFORE EVERY ACTION:** Before writing any new code, first output a short summary of what is already built and working. Format: “✅ Done: [list] | 🔨 Now building: [current task]”. This prevents re-doing completed work and saves tokens.
+1. **NEVER REWRITE WORKING CODE:** If a feature is already built and tested, do not touch it. Only add or modify what is explicitly requested. Do not refactor, rename, or restructure existing working code unless asked.
+1. **ONE TASK AT A TIME:** Build one feature completely before starting the next. Do not start a new feature mid-way through another. Confirm each feature works before moving on.
+1. **MINIMAL OUTPUT:** Do not re-print entire files when making small changes. Show only the changed lines with context. Save tokens by being surgical, not wholesale.
+1. **ASK BEFORE ASSUMING:** If a requirement is unclear, ask one question before writing code. Do not guess and write 200 lines that need to be thrown away.

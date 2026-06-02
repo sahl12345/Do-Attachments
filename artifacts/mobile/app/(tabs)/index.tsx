@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React from "react";
+import React, { useMemo } from "react";
 import {
   Platform,
   ScrollView,
@@ -26,6 +26,18 @@ export default function HomeScreen() {
   const recentSessions = sessions.slice(0, 5);
   const activeSessions = sessions.filter((s) => !s.completedAt);
   const webTop = Platform.OS === "web" ? 67 : 0;
+
+  const monthlyStats = useMemo(() => {
+    const now = new Date();
+    const monthSessions = sessions.filter((s) => {
+      const d = new Date(s.createdAt);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+    const done = monthSessions.filter((s) => s.completedAt);
+    const wins = done.filter((s) => s.winnerId && s.players.some((p) => p.name === userName && p.id === s.winnerId)).length;
+    const winRate = done.length > 0 ? Math.round((wins / done.length) * 100) : 0;
+    return { total: monthSessions.length, wins, winRate };
+  }, [sessions, userName]);
 
   return (
     <ScrollView
@@ -99,6 +111,29 @@ export default function HomeScreen() {
         </Text>
       </TouchableOpacity>
 
+      {sessions.length > 0 && (
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.statVal, { color: colors.text, fontFamily: Fonts.mono }]}>
+              {monthlyStats.total}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>جلسة هالشهر</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.statVal, { color: colors.gold, fontFamily: Fonts.mono }]}>
+              {monthlyStats.wins}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>انتصار</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.statVal, { color: monthlyStats.winRate >= 50 ? colors.success : colors.textMuted, fontFamily: Fonts.mono }]}>
+              {monthlyStats.winRate}%
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.textMuted }]}>نسبة الفوز</Text>
+          </View>
+        </View>
+      )}
+
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
           الجلسات الأخيرة
@@ -167,6 +202,20 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   secondaryBtnText: { fontFamily: Fonts.heading, fontSize: 17 },
+  statsRow: {
+    flexDirection: "row-reverse",
+    gap: 10,
+    marginBottom: 24,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+    gap: 4,
+  },
+  statVal: { fontSize: 22 },
+  statLabel: { fontFamily: Fonts.body, fontSize: 11, textAlign: "center" },
   section: {},
   sectionTitle: {
     fontFamily: Fonts.heading,
