@@ -1,0 +1,225 @@
+خليني أشوف البرومت الأصلي عشان أعرف بالضبط شو ضايل وأكتب برومت دقيق.
+
+هلق أكتب البرومت النهائي الكامل:
+
+انسخ هاذا كامل وحطه بـ Replit:
+
+أنت تعمل على تطبيق “تعليلة شدة”. قبل أي شي افحص الكود واكتب:
+
+✅ مكتمل ويشتغل:
+🔨 ناقص أو في مشكلة:
+
+
+بعدين نفّذ هاذه المهام بالترتيب — مهمة وحدة بكل مرة، لا تبدأ التالية قبل ما تخلص السابقة وتأكد إنها شغالة.
+
+المهمة ١ — إصلاح Google OAuth نهائياً (أولوية قصوى)
+
+المشكلة الحالية: عند الضغط على Google بيفتح متصفح على /auth/callback ويطلع “Not Found”.
+
+المطلوب بالضبط:
+
+١. اعمل ملف app/auth/callback.tsx بهاذا الكود:
+
+import { useEffect } from 'react'
+import { View, ActivityIndicator } from 'react-native'
+import { useRouter } from 'expo-router'
+import { supabase } from '@/services/supabase'
+import * as Linking from 'expo-linking'
+
+export default function AuthCallback() {
+  const router = useRouter()
+
+  useEffect(() => {
+    const handleCallback = async () => {
+      const url = await Linking.getInitialURL()
+      if (!url) return
+
+      // اقرأ الـ tokens من الـ URL
+      const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1])
+      const access_token = params.get('access_token')
+      const refresh_token = params.get('refresh_token')
+      const code = params.get('code')
+
+      if (access_token && refresh_token) {
+        await supabase.auth.setSession({ access_token, refresh_token })
+        router.replace('/(tabs)')
+      } else if (code) {
+        await supabase.auth.exchangeCodeForSession(code)
+        router.replace('/(tabs)')
+      } else {
+        router.replace('/auth')
+      }
+    }
+
+    handleCallback()
+  }, [])
+
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0D0D1A', justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#C9A84C" />
+    </View>
+  )
+}
+
+
+٢. في ملف services/auth.ts تأكد إن الـ redirectTo يشير لـ:
+
+const redirectTo = 'https://do-attachments.replit.app/auth/callback'
+
+
+٣. في app.json تأكد إن scheme موجود:
+
+{
+  "expo": {
+    "scheme": "ta3leeleh",
+    "plugins": ["expo-router"]
+  }
+}
+
+
+٤. بعد التعديل اعمل Republish كامل — مش بس restart.
+
+٥. اختبر: افتح التطبيق، اضغط Google، سجّل دخول، تأكد إنك توصل للـ home screen.
+
+اكتب “✅ المهمة ١ خلصت واللوجين شغال” قبل ما تكمل.
+
+المهمة ٢ — نظام الجلسة المشتركة بكود
+
+بعد ما يشتغل اللوجين — اعمل هاذا:
+
+أولاً شغّل هاذا الـ SQL بـ Supabase SQL Editor:
+
+create table if not exists public.sessions (
+  id uuid default gen_random_uuid() primary key,
+  code text unique not null,
+  game_type text not null,
+  game_variant text default 'normal',
+  status text default 'waiting',
+  settings jsonb default '{}',
+  created_by uuid references auth.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  ended_at timestamptz
+);
+
+create table if not exists public.session_players (
+  id uuid default gen_random_uuid() primary key,
+  session_id uuid references public.sessions(id) on delete cascade,
+  user_id uuid references auth.users(id) on delete cascade,
+  display_name text not null,
+  team text,
+  score integer default 0,
+  joined_at timestamptz default now()
+);
+
+create table if not exists public.rounds (
+  id uuid default gen_random_uuid() primary key,
+  session_id uuid references public.sessions(id) on delete cascade,
+  round_number integer not null,
+  round_data jsonb not null default '{}',
+  recorded_by uuid references auth.users(id),
+  created_at timestamptz default now()
+);
+
+alter table public.sessions enable row level security;
+alter table public.session_players enable row level security;
+alter table public.rounds enable row level security;
+
+create policy "sessions_all" on public.sessions for all using (true);
+create policy "players_all" on public.session_players for all using (true);
+create policy "rounds_all" on public.rounds for all using (true);
+
+
+ثانياً شاشة “جلسة جديدة”:
+
+	•	اختيار اللعبة من قائمة
+	•	توليد كود 6 أحرف تلقائياً (مثل SH-4829)
+	•	حفظ الجلسة بـ Supabase
+	•	عرض الكود كبير مع زر مشاركة واتساب
+	•	قائمة اللاعبين تتحدث لحظياً
+
+ثالثاً شاشة “انضم بكود”:
+
+	•	input لإدخال الكود
+	•	بعد الإدخال يدخل كـ player على نفس الجلسة
+	•	ينتقل لشاشة الانتظار
+
+رابعاً شاشة الانتظار (Lobby):
+
+	•	تعرض الكود + قائمة اللاعبين المنضمين
+	•	تتحدث لحظياً عبر Supabase Realtime
+	•	زر “ابدأ اللعبة” للـ host فقط
+
+المهمة ٣ — Real-time Scoreboard
+
+بعد ما تشتغل الجلسة:
+
+	•	كل لاعب على تلفونه يشوف نفس النقاط بنفس الوقت
+	•	اشترك على التغييرات:
+
+supabase
+  .channel(`session:${sessionId}`)
+  .on('postgres_changes', {
+    event: 'INSERT',
+    schema: 'public',
+    table: 'rounds',
+    filter: `session_id=eq.${sessionId}`
+  }, () => refreshScores())
+  .subscribe()
+
+
+	•	النقاط تتحدث بـ animation عند كل تغيير
+	•	لو لاعب offline → “غير متصل 🔴” جنب اسمه
+
+المهمة ٤ — Anti-Cheat
+
+	•	toggle في إعدادات الجلسة
+	•	بعد تسجيل لطشة: إشعار لباقي اللاعبين “سهل سجّل لطشة — صح؟”
+	•	✅ موافق أو ❌ رفض
+	•	أغلبية توافق → تُسجَّل + flash أخضر
+	•	اعتراض → flash أحمر + رسالة عشوائية:
+	•	“في خلاف! ناقشوا مع بعض 😂”
+	•	“مين اللي بيغش هون؟ 👀”
+	•	“بتشك فيك والله 😤”
+	•	Timeout: 10 ثواني افتراضي، قابل للتغيير
+
+المهمة ٥ — إحصائيات الشلة والرانك
+
+شاشة الشلة:
+
+	•	كل الناس اللي لعبت معهم
+	•	W/L record لكل شخص
+	•	“سهل فاز عليك ١٢ مرة وخسر ٤ — ثأر منه 😤”
+	•	زر “تحدّاه”
+
+شاشة البروفايل — Rank:
+
+	•	🥉 مبتدئ: 0-10 جلسات
+	•	🥈 لاعب: 11-30
+	•	🥇 محترف: 31-60
+	•	💎 أسطورة: 61+
+	•	👑 شيخ الجلسة: Top 5% هالشهر
+
+ألقاب تلقائية:
+
+	•	👑 ملك اللطش، 🐐 الـ GOAT، 😂 ملك الخسارة، 💀 يا وحش، 💸 خسران بس بشرف
+
+المهمة ٦ — Debt Tracker
+
+	•	toggle في إعدادات الجلسة
+	•	حدد المبلغ لكل نقطة (0.10 دينار مثلاً)
+	•	في نهاية الجلسة: “محمد يدفع ٣.٥٠ دينار لسهل 💸”
+	•	زر “تم الدفع ✅”
+	•	سجل الديون محفوظ
+
+قواعد صارمة لا تنساها أبداً:
+
+	1.	مهمة وحدة بكل مرة — لا تبدأ ٢ قبل ما تخلص ١
+	2.	بعد كل مهمة اكتب “✅ المهمة [رقم] خلصت”
+	3.	لا تعيد كتابة كود شغّال
+	4.	كل النصوص عامية أردنية — لا فصحى
+	5.	RTL في كل شاشة جديدة
+	6.	Dark theme فقط — background #0D0D1A
+	7.	بعد أي تعديل اعمل Republish كامل مش بس restart
+	8.	لا تستخدم phone OTP أو email OTP — Google فقط
+
+ابدأ بالمهمة ١ الآن. 🚀

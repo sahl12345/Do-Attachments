@@ -41,6 +41,9 @@ export default function NewSessionScreen() {
   const [players, setPlayers] = useState<string[]>(["", "", "", ""]);
   const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
+  const [antiCheat, setAntiCheat] = useState(false);
+  const [debtEnabled, setDebtEnabled] = useState(false);
+  const [debtPerPoint, setDebtPerPoint] = useState("0.10");
   const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
@@ -121,6 +124,8 @@ export default function NewSessionScreen() {
       rounds: [],
       targetScore: targetScore || selectedGame.defaultTarget,
       createdAt: Date.now(),
+      antiCheat: antiCheat || undefined,
+      debtPerPoint: debtEnabled ? parseFloat(debtPerPoint) || 0.1 : undefined,
     };
     addSession(session);
     router.replace(`/session/${session.id}`);
@@ -496,6 +501,97 @@ export default function NewSessionScreen() {
                 ))}
               </View>
             </View>
+
+            {/* Anti-cheat toggle */}
+            <View style={[styles.toggleBlock, { backgroundColor: colors.surface }]}>
+              <View style={styles.toggleRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setAntiCheat((v) => !v);
+                    Haptics.selectionAsync();
+                  }}
+                  style={[
+                    styles.toggleSwitch,
+                    { backgroundColor: antiCheat ? colors.gold : colors.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.toggleThumb,
+                      {
+                        backgroundColor: colors.background,
+                        transform: [{ translateX: antiCheat ? 20 : 2 }],
+                      },
+                    ]}
+                  />
+                </TouchableOpacity>
+                <View style={styles.toggleText}>
+                  <Text style={[styles.toggleLabel, { color: colors.text }]}>
+                    👀 مانع الغش
+                  </Text>
+                  <Text style={[styles.toggleDesc, { color: colors.textMuted }]}>
+                    تأكيد كل جولة قبل تسجيلها
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Debt tracker toggle */}
+            <View style={[styles.toggleBlock, { backgroundColor: colors.surface }]}>
+              <View style={styles.toggleRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setDebtEnabled((v) => !v);
+                    Haptics.selectionAsync();
+                  }}
+                  style={[
+                    styles.toggleSwitch,
+                    { backgroundColor: debtEnabled ? colors.gold : colors.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.toggleThumb,
+                      {
+                        backgroundColor: colors.background,
+                        transform: [{ translateX: debtEnabled ? 20 : 2 }],
+                      },
+                    ]}
+                  />
+                </TouchableOpacity>
+                <View style={styles.toggleText}>
+                  <Text style={[styles.toggleLabel, { color: colors.text }]}>
+                    💸 حساب الديون
+                  </Text>
+                  <Text style={[styles.toggleDesc, { color: colors.textMuted }]}>
+                    احسب مين يدفع لمين بالنهاية
+                  </Text>
+                </View>
+              </View>
+              {debtEnabled && (
+                <View style={[styles.debtRow, { borderTopColor: colors.border }]}>
+                  <Text style={[styles.debtLabel, { color: colors.textMuted }]}>
+                    قيمة كل نقطة (دينار)
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.debtInput,
+                      {
+                        backgroundColor: colors.surfaceRaised,
+                        color: colors.text,
+                        borderColor: colors.gold,
+                        fontFamily: Fonts.mono,
+                      },
+                    ]}
+                    value={debtPerPoint}
+                    onChangeText={setDebtPerPoint}
+                    keyboardType="decimal-pad"
+                    textAlign="center"
+                    selectTextOnFocus
+                  />
+                </View>
+              )}
+            </View>
           </ScrollView>
         )}
       </View>
@@ -698,6 +794,16 @@ const styles = StyleSheet.create({
   settingBlock: { gap: 10 },
   settingLabel: { fontFamily: Fonts.heading, fontSize: 18, textAlign: "right" },
   settingDesc: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right" },
+  toggleBlock: { borderRadius: 16, overflow: "hidden" },
+  toggleRow: { flexDirection: "row-reverse", alignItems: "center", gap: 14, padding: 16 },
+  toggleSwitch: { width: 44, height: 26, borderRadius: 13, justifyContent: "center" },
+  toggleThumb: { width: 20, height: 20, borderRadius: 10 },
+  toggleText: { flex: 1, gap: 2 },
+  toggleLabel: { fontFamily: Fonts.heading, fontSize: 16, textAlign: "right" },
+  toggleDesc: { fontFamily: Fonts.body, fontSize: 12, textAlign: "right" },
+  debtRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1 },
+  debtLabel: { fontFamily: Fonts.body, fontSize: 14 },
+  debtInput: { width: 80, height: 40, borderRadius: 10, borderWidth: 1.5, fontSize: 16, textAlign: "center" },
   targetRow: { flexDirection: "row-reverse", gap: 10, marginTop: 8 },
   targetBtn: {
     flex: 1,

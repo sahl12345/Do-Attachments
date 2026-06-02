@@ -36,6 +36,8 @@ export interface Session {
   createdAt: number;
   completedAt?: number;
   winnerId?: string;
+  antiCheat?: boolean;
+  debtPerPoint?: number;
 }
 
 interface AppContextType {

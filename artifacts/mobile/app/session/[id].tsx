@@ -61,6 +61,15 @@ function checkOnlineWinner(session: OnlineSessionData): string | null {
   return winner?.id ?? null;
 }
 
+// ─── Anti-cheat messages ─────────────────────────────────────────────────────
+const ANTI_CHEAT_MSGS = [
+  "في خلاف! ناقشوا مع بعض 😂",
+  "مين اللي بيغش هون؟ 👀",
+  "بتشك فيك والله 😤",
+  "هاد مرق بسهولة كتير... 🤔",
+  "الكل يراقب 👀👀",
+];
+
 // ─── Levantine win phrases ────────────────────────────────────────────────────
 const WIN_PHRASES = [
   "لطش يا زلمة 👑",
@@ -126,6 +135,15 @@ export default function SessionScreen() {
   const [startingOnline, setStartingOnline] = useState(false);
   const winnerAnim = useRef(new Animated.Value(0)).current;
   const webTop = Platform.OS === "web" ? 67 : 0;
+
+  // Anti-cheat
+  const [pendingScores, setPendingScores] = useState<Record<string, number> | null>(null);
+  const [antiCheatCountdown, setAntiCheatCountdown] = useState(10);
+  const [antiCheatRejected, setAntiCheatRejected] = useState(false);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Debt tracker
+  const [paidSet, setPaidSet] = useState<Set<string>>(new Set());
 
   // ── local session ──────────────────────────────────────────────────────────
   const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
@@ -194,9 +212,8 @@ export default function SessionScreen() {
     return winner?.id ?? null;
   };
 
-  const handleAddLocalRound = (scores: Record<string, number>) => {
+  const _commitLocalRound = useCallback((scores: Record<string, number>) => {
     if (!localSession) return;
-    setShowScoreModal(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const round: Round = { id: generateId(), scores, timestamp: Date.now() };
     const updatedRounds = [...localSession.rounds, round];
@@ -208,7 +225,38 @@ export default function SessionScreen() {
     } else {
       updateSession(localSession.id, updatedSession);
     }
+  }, [localSession, updateSession, getLocalWinnerId]);
+
+  const handleAddLocalRound = (scores: Record<string, number>) => {
+    if (!localSession) return;
+    setShowScoreModal(false);
+    if (localSession.antiCheat) {
+      // Show anti-cheat confirm modal with 10-second countdown
+      setPendingScores(scores);
+      setAntiCheatCountdown(10);
+      setAntiCheatRejected(false);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      countdownRef.current = setInterval(() => {
+        setAntiCheatCountdown((prev) => {
+          if (prev <= 1) {
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      _commitLocalRound(scores);
+    }
   };
+
+  // When anti-cheat countdown hits 0 → auto-approve
+  useEffect(() => {
+    if (pendingScores && antiCheatCountdown === 0 && !antiCheatRejected) {
+      setPendingScores(null);
+      _commitLocalRound(pendingScores);
+    }
+  }, [antiCheatCountdown, pendingScores, antiCheatRejected, _commitLocalRound]);
 
   const handleUndoLocal = () => {
     if (!localSession || localSession.rounds.length === 0) return;
@@ -710,6 +758,74 @@ export default function SessionScreen() {
         onSubmit={handleAddRound}
       />
 
+      {/* Anti-cheat confirm modal */}
+      <Modal visible={!!pendingScores} animationType="fade" transparent statusBarTranslucent>
+        <View style={styles.acOverlay}>
+          <View style={[styles.acCard, { backgroundColor: colors.surfaceHigh, borderColor: antiCheatRejected ? colors.red : colors.borderStrong }]}>
+            {antiCheatRejected ? (
+              <>
+                <Text style={styles.acEmoji}>🚨</Text>
+                <Text style={[styles.acTitle, { color: colors.red }]}>اعتراض!</Text>
+                <Text style={[styles.acMsg, { color: colors.textMuted }]}>
+                  {ANTI_CHEAT_MSGS[Math.floor(Math.random() * ANTI_CHEAT_MSGS.length)]}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => setPendingScores(null)}
+                  style={[styles.acBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                >
+                  <Text style={[styles.acBtnText, { color: colors.text }]}>ارجع سجّل من جديد</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.acEmoji}>👀</Text>
+                <Text style={[styles.acTitle, { color: colors.text }]}>تأكيد الجولة</Text>
+                <View style={styles.acScores}>
+                  {sessionPlayers.map((p) => (
+                    <View key={p.id} style={[styles.acScoreRow, { backgroundColor: colors.surface }]}>
+                      <Text style={[styles.acScore, { color: colors.gold, fontFamily: "IBMPlexMono_400Regular" }]}>
+                        {pendingScores?.[p.id] ?? 0}+
+                      </Text>
+                      <Text style={[styles.acPlayerName, { color: colors.text }]}>{p.name}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={[styles.acCountdown, { borderColor: colors.borderStrong }]}>
+                  <Text style={[styles.acCountdownNum, { color: antiCheatCountdown <= 3 ? colors.red : colors.gold, fontFamily: "IBMPlexMono_400Regular" }]}>
+                    {antiCheatCountdown}
+                  </Text>
+                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>ثانية للتأكيد التلقائي</Text>
+                </View>
+                <View style={styles.acBtns}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (countdownRef.current) clearInterval(countdownRef.current);
+                      setAntiCheatRejected(true);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                    }}
+                    style={[styles.acBtn, { backgroundColor: `${colors.red}22`, borderColor: `${colors.red}55` }]}
+                  >
+                    <Text style={[styles.acBtnText, { color: colors.red }]}>❌ اعتراض</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (countdownRef.current) clearInterval(countdownRef.current);
+                      const s = pendingScores!;
+                      setPendingScores(null);
+                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      _commitLocalRound(s);
+                    }}
+                    style={[styles.acBtn, { backgroundColor: `${colors.gold}22`, borderColor: `${colors.gold}55` }]}
+                  >
+                    <Text style={[styles.acBtnText, { color: colors.gold }]}>✅ موافق</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={showWinner} animationType="none" transparent statusBarTranslucent>
         <View style={styles.winnerOverlay}>
           <ConfettiBurst active={showWinner} />
@@ -743,6 +859,48 @@ export default function SessionScreen() {
                 <Text style={[styles.winnerStatLabel, { color: colors.textMuted }]}>نقطة</Text>
               </View>
             </View>
+
+            {/* Debt summary — local sessions only */}
+            {localSession?.debtPerPoint && localSession.debtPerPoint > 0 && sessionWinnerId && (
+              <View style={[styles.debtSection, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.debtTitle, { color: colors.textMuted }]}>💸 الحسابات</Text>
+                {scoredPlayers
+                  .filter((p) => p.player.id !== sessionWinnerId)
+                  .map((p) => {
+                    const winnerTotal = scoredPlayers.find((x) => x.player.id === sessionWinnerId)?.total ?? 0;
+                    const diff = Math.abs(winnerTotal - p.total);
+                    const amount = (diff * (localSession.debtPerPoint ?? 0)).toFixed(2);
+                    const paid = paidSet.has(p.player.id);
+                    return (
+                      <TouchableOpacity
+                        key={p.player.id}
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setPaidSet((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(p.player.id)) next.delete(p.player.id);
+                            else next.add(p.player.id);
+                            return next;
+                          });
+                        }}
+                        style={[styles.debtRow, { opacity: paid ? 0.5 : 1 }]}
+                      >
+                        <Text style={[styles.debtPaid, { color: paid ? colors.gold : colors.textDim }]}>
+                          {paid ? "✅ تم" : "اضغط"}
+                        </Text>
+                        <Text style={[styles.debtText, { color: paid ? colors.textDim : colors.text }]}>
+                          <Text style={{ color: colors.red }}>{p.player.name}</Text>
+                          {" يدفع "}
+                          <Text style={{ color: colors.gold, fontFamily: "IBMPlexMono_400Regular" }}>{amount}</Text>
+                          {" دينار لـ "}
+                          <Text style={{ color: colors.gold }}>{winnerPlayer?.name}</Text>
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+              </View>
+            )}
+
             <View style={styles.winnerBtns}>
               <TouchableOpacity
                 onPress={() => setShowWinner(false)}
@@ -890,6 +1048,28 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   addRoundText: { fontFamily: Fonts.heading, fontSize: 18 },
+  // Anti-cheat modal
+  acOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", padding: 32 },
+  acCard: { borderRadius: 24, borderWidth: 2, padding: 28, alignItems: "center", gap: 14, width: "100%", maxWidth: 320 },
+  acEmoji: { fontSize: 44, textAlign: "center" },
+  acTitle: { fontFamily: Fonts.heading, fontSize: 22, textAlign: "center" },
+  acMsg: { fontFamily: Fonts.body, fontSize: 15, textAlign: "center", lineHeight: 22 },
+  acScores: { width: "100%", gap: 8 },
+  acScoreRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12 },
+  acScore: { fontSize: 20 },
+  acPlayerName: { fontFamily: Fonts.heading, fontSize: 16 },
+  acCountdown: { borderRadius: 50, width: 72, height: 72, alignItems: "center", justifyContent: "center", borderWidth: 2, gap: 2 },
+  acCountdownNum: { fontSize: 26 },
+  acCountdownLabel: { fontFamily: Fonts.body, fontSize: 10, textAlign: "center" },
+  acBtns: { flexDirection: "row", gap: 10, width: "100%" },
+  acBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: "center", borderWidth: 1 },
+  acBtnText: { fontFamily: Fonts.heading, fontSize: 15 },
+  // Debt tracker in winner
+  debtSection: { width: "100%", borderRadius: 16, padding: 14, gap: 10 },
+  debtTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "center" },
+  debtRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  debtText: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right", flex: 1, lineHeight: 20 },
+  debtPaid: { fontFamily: Fonts.body, fontSize: 11 },
   winnerOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",
