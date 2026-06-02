@@ -4,11 +4,16 @@ import { Session } from "@/contexts/AppContext";
 
 // ── Google OAuth ───────────────────────────────────────────────────────────────
 
+const DEPLOYED_ORIGIN = "https://do-attachments.replit.app";
+
 export async function signInWithGoogle() {
-  const redirectTo =
+  // Always point to the /auth/callback route so Supabase can parse the session
+  const origin =
     Platform.OS === "web" && typeof window !== "undefined"
       ? window.location.origin
-      : undefined;
+      : DEPLOYED_ORIGIN;
+
+  const redirectTo = `${origin}/auth/callback`;
 
   return supabase.auth.signInWithOAuth({
     provider: "google",
