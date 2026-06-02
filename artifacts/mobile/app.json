@@ -25,10 +25,7 @@
     },
     "plugins": [
       [
-        "expo-router",
-        {
-          "origin": "https://do-attachments.replit.app"
-        }
+        "expo-router"
       ],
       "expo-font",
       "expo-web-browser"

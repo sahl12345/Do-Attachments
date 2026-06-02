@@ -1,4 +1,4 @@
-import * as Linking from "expo-linking";
+import Constants from "expo-constants";
 import * as WebBrowser from "expo-web-browser";
 import { Platform } from "react-native";
 
@@ -10,13 +10,25 @@ WebBrowser.maybeCompleteAuthSession();
 
 // ── Google OAuth ───────────────────────────────────────────────────────────────
 
+function _nativeRedirectUri(): string {
+  // In Expo Go: hostUri = "xxx.expo.sisko.replit.dev" → "exp://xxx.../--/auth/callback"
+  // In production standalone: no hostUri → use the app's custom scheme
+  // We must NOT use https:// here — iOS converts it to exps:// which breaks
+  // WebBrowser.openAuthSessionAsync callback detection.
+  const hostUri = Constants.expoConfig?.hostUri;
+  if (hostUri) {
+    return `exp://${hostUri}/--/auth/callback`;
+  }
+  return "mobile://auth/callback";
+}
+
 export async function signInWithGoogle() {
   if (Platform.OS !== "web") {
     // Native (Expo Go or standalone):
     // 1. Get the OAuth URL from Supabase without auto-redirecting
     // 2. Open it in a browser session via expo-web-browser
     // 3. Parse the returned tokens and set the Supabase session
-    const redirectTo = Linking.createURL("auth/callback");
+    const redirectTo = _nativeRedirectUri();
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
