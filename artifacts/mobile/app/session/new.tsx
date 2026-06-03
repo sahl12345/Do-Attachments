@@ -46,6 +46,7 @@ export default function NewSessionScreen() {
   const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
   const [antiCheat, setAntiCheat] = useState(false);
+  const [acTimeoutSecs, setAcTimeoutSecs] = useState(10);
   const [debtEnabled, setDebtEnabled] = useState(false);
   const [debtPerPoint, setDebtPerPoint] = useState("0.10");
   const [gameRules, setGameRules] = useState<GameRules>({});
@@ -165,6 +166,7 @@ export default function NewSessionScreen() {
       targetScore: targetScore || selectedGame.defaultTarget,
       createdAt: Date.now(),
       antiCheat: antiCheat || undefined,
+      antiCheatTimeout: antiCheat ? acTimeoutSecs : undefined,
       debtPerPoint: debtEnabled ? parseFloat(debtPerPoint) || 0.1 : undefined,
       rules: Object.keys(cleanRules).length > 0 ? cleanRules : undefined,
     };
@@ -779,10 +781,36 @@ export default function NewSessionScreen() {
                     👀 مانع الغش
                   </Text>
                   <Text style={[styles.toggleDesc, { color: colors.textMuted }]}>
-                    تأكيد كل جولة قبل تسجيلها
+                    تصويت الأغلبية قبل تسجيل كل جولة
                   </Text>
                 </View>
               </View>
+              {antiCheat && (
+                <View style={[styles.acTimeoutRow, { borderTopColor: colors.border }]}>
+                  <Text style={[styles.acTimeoutLabel, { color: colors.textMuted }]}>
+                    مهلة التصويت
+                  </Text>
+                  <View style={styles.ruleStepperRow}>
+                    {[5, 10, 15, 30].map((v) => (
+                      <TouchableOpacity
+                        key={v}
+                        onPress={() => { setAcTimeoutSecs(v); Haptics.selectionAsync(); }}
+                        style={[
+                          styles.ruleStepBtn,
+                          {
+                            backgroundColor: acTimeoutSecs === v ? colors.gold : colors.surfaceRaised,
+                            borderColor: acTimeoutSecs === v ? colors.gold : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text style={[styles.ruleStepBtnText, { color: acTimeoutSecs === v ? colors.background : colors.textMuted }]}>
+                          {v}s
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Debt tracker toggle */}
@@ -1040,6 +1068,8 @@ const styles = StyleSheet.create({
   },
   chip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   chipText: { fontFamily: Fonts.body, fontSize: 13 },
+  acTimeoutRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1 },
+  acTimeoutLabel: { fontFamily: Fonts.body, fontSize: 13 },
   // Game rules section
   rulesCard: { borderRadius: 16, overflow: "hidden", marginTop: 8 },
   ruleRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, gap: 10 },

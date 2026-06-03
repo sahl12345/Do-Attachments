@@ -44,6 +44,7 @@ export interface Session {
   completedAt?: number;
   winnerId?: string;
   antiCheat?: boolean;
+  antiCheatTimeout?: number; // seconds, default 10
   debtPerPoint?: number;
   rules?: GameRules;
 }

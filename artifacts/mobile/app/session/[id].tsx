@@ -140,7 +140,11 @@ export default function SessionScreen() {
   const [pendingScores, setPendingScores] = useState<Record<string, number> | null>(null);
   const [antiCheatCountdown, setAntiCheatCountdown] = useState(10);
   const [antiCheatRejected, setAntiCheatRejected] = useState(false);
+  const [acApprovals, setAcApprovals] = useState(0);
+  const [acRejections, setAcRejections] = useState(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const acFlashAnim = useRef(new Animated.Value(0)).current;
+  const [acFlashColor, setAcFlashColor] = useState<"green" | "red">("green");
 
   // Debt tracker
   const [paidSet, setPaidSet] = useState<Set<string>>(new Set());
@@ -236,14 +240,54 @@ export default function SessionScreen() {
     }
   }, [localSession, updateSession, getLocalWinnerId]);
 
+  const doAcFlash = useCallback((color: "green" | "red") => {
+    setAcFlashColor(color);
+    Animated.sequence([
+      Animated.timing(acFlashAnim, { toValue: 1, duration: 120, useNativeDriver: true }),
+      Animated.timing(acFlashAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start();
+  }, [acFlashAnim]);
+
+  const acMajority = Math.ceil((localSession?.players.length ?? 2) / 2);
+
+  const handleAcApprove = useCallback(() => {
+    const next = acApprovals + 1;
+    if (next >= acMajority) {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      const s = pendingScores!;
+      setPendingScores(null);
+      doAcFlash("green");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      _commitLocalRound(s);
+    } else {
+      setAcApprovals(next);
+      Haptics.selectionAsync();
+    }
+  }, [acApprovals, acMajority, pendingScores, doAcFlash, _commitLocalRound]);
+
+  const handleAcReject = useCallback(() => {
+    const next = acRejections + 1;
+    if (next >= acMajority) {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      setAntiCheatRejected(true);
+      doAcFlash("red");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } else {
+      setAcRejections(next);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  }, [acRejections, acMajority, doAcFlash]);
+
   const handleAddLocalRound = (scores: Record<string, number>) => {
     if (!localSession) return;
     setShowScoreModal(false);
     if (localSession.antiCheat) {
-      // Show anti-cheat confirm modal with 10-second countdown
+      const timeout = localSession.antiCheatTimeout ?? 10;
       setPendingScores(scores);
-      setAntiCheatCountdown(10);
+      setAntiCheatCountdown(timeout);
       setAntiCheatRejected(false);
+      setAcApprovals(0);
+      setAcRejections(0);
       if (countdownRef.current) clearInterval(countdownRef.current);
       countdownRef.current = setInterval(() => {
         setAntiCheatCountdown((prev) => {
@@ -263,9 +307,10 @@ export default function SessionScreen() {
   useEffect(() => {
     if (pendingScores && antiCheatCountdown === 0 && !antiCheatRejected) {
       setPendingScores(null);
+      doAcFlash("green");
       _commitLocalRound(pendingScores);
     }
-  }, [antiCheatCountdown, pendingScores, antiCheatRejected, _commitLocalRound]);
+  }, [antiCheatCountdown, pendingScores, antiCheatRejected, doAcFlash, _commitLocalRound]);
 
   const handleUndoLocal = () => {
     if (!localSession || localSession.rounds.length === 0) return;
@@ -615,6 +660,18 @@ export default function SessionScreen() {
         </View>
       )}
 
+      {/* AC flash overlay */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.acFlashOverlay,
+          {
+            backgroundColor: acFlashColor === "green" ? colors.success : colors.red,
+            opacity: acFlashAnim,
+          },
+        ]}
+      />
+
       <ScrollView
         contentContainerStyle={[
           styles.scoresContainer,
@@ -768,10 +825,13 @@ export default function SessionScreen() {
         onSubmit={handleAddRound}
       />
 
-      {/* Anti-cheat confirm modal */}
+      {/* Anti-cheat voting modal */}
       <Modal visible={!!pendingScores} animationType="fade" transparent statusBarTranslucent>
         <View style={styles.acOverlay}>
-          <View style={[styles.acCard, { backgroundColor: colors.surfaceHigh, borderColor: antiCheatRejected ? colors.red : colors.borderStrong }]}>
+          <View style={[styles.acCard, {
+            backgroundColor: colors.surfaceHigh,
+            borderColor: antiCheatRejected ? colors.red : acApprovals > 0 ? colors.success : colors.borderStrong,
+          }]}>
             {antiCheatRejected ? (
               <>
                 <Text style={styles.acEmoji}>🚨</Text>
@@ -781,7 +841,7 @@ export default function SessionScreen() {
                 </Text>
                 <TouchableOpacity
                   onPress={() => setPendingScores(null)}
-                  style={[styles.acBtn, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                  style={[styles.acBtn, { backgroundColor: colors.surface, borderColor: colors.border, width: "100%" }]}
                 >
                   <Text style={[styles.acBtnText, { color: colors.text }]}>ارجع سجّل من جديد</Text>
                 </TouchableOpacity>
@@ -789,45 +849,72 @@ export default function SessionScreen() {
             ) : (
               <>
                 <Text style={styles.acEmoji}>👀</Text>
-                <Text style={[styles.acTitle, { color: colors.text }]}>تأكيد الجولة</Text>
+                <Text style={[styles.acTitle, { color: colors.text }]}>هالجولة صح؟</Text>
+                <Text style={[styles.acMsg, { color: colors.textMuted }]}>
+                  تأكيد من الأغلبية ({acMajority} من {sessionPlayers.length})
+                </Text>
+
+                {/* Score preview */}
                 <View style={styles.acScores}>
-                  {sessionPlayers.map((p) => (
-                    <View key={p.id} style={[styles.acScoreRow, { backgroundColor: colors.surface }]}>
-                      <Text style={[styles.acScore, { color: colors.gold, fontFamily: "IBMPlexMono_400Regular" }]}>
-                        {pendingScores?.[p.id] ?? 0}+
-                      </Text>
-                      <Text style={[styles.acPlayerName, { color: colors.text }]}>{p.name}</Text>
-                    </View>
-                  ))}
+                  {sessionPlayers.map((p) => {
+                    const sc = pendingScores?.[p.id] ?? 0;
+                    return (
+                      <View key={p.id} style={[styles.acScoreRow, { backgroundColor: colors.surface }]}>
+                        <Text style={[styles.acScore, {
+                          color: sc > 0 ? colors.success : sc < 0 ? colors.red : colors.textDim,
+                          fontFamily: "IBMPlexMono_400Regular",
+                        }]}>
+                          {sc >= 0 ? `+${sc}` : `${sc}`}
+                        </Text>
+                        <Text style={[styles.acPlayerName, { color: colors.text }]}>{p.name}</Text>
+                      </View>
+                    );
+                  })}
                 </View>
-                <View style={[styles.acCountdown, { borderColor: colors.borderStrong }]}>
-                  <Text style={[styles.acCountdownNum, { color: antiCheatCountdown <= 3 ? colors.red : colors.gold, fontFamily: "IBMPlexMono_400Regular" }]}>
+
+                {/* Vote tally */}
+                <View style={[styles.acVoteTally, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.acVoteCount}>
+                    <Text style={[styles.acVoteNum, { color: colors.success }]}>{acApprovals}</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ موافقة</Text>
+                  </View>
+                  <View style={[styles.acVoteDivider, { backgroundColor: colors.border }]} />
+                  <View style={styles.acVoteCount}>
+                    <Text style={[styles.acVoteNum, { color: colors.red }]}>{acRejections}</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>❌ اعتراض</Text>
+                  </View>
+                </View>
+
+                {/* Countdown */}
+                <View style={[styles.acCountdown, { borderColor: antiCheatCountdown <= 3 ? colors.red : colors.borderStrong }]}>
+                  <Text style={[styles.acCountdownNum, {
+                    color: antiCheatCountdown <= 3 ? colors.red : colors.gold,
+                    fontFamily: "IBMPlexMono_400Regular",
+                  }]}>
                     {antiCheatCountdown}
                   </Text>
-                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>ثانية للتأكيد التلقائي</Text>
+                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تأكيد تلقائي</Text>
                 </View>
+
+                {/* Buttons */}
                 <View style={styles.acBtns}>
                   <TouchableOpacity
-                    onPress={() => {
-                      if (countdownRef.current) clearInterval(countdownRef.current);
-                      setAntiCheatRejected(true);
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                    }}
+                    onPress={handleAcReject}
                     style={[styles.acBtn, { backgroundColor: `${colors.red}22`, borderColor: `${colors.red}55` }]}
                   >
                     <Text style={[styles.acBtnText, { color: colors.red }]}>❌ اعتراض</Text>
+                    {acRejections > 0 && (
+                      <Text style={[styles.acBtnCount, { color: colors.red }]}>×{acRejections}</Text>
+                    )}
                   </TouchableOpacity>
                   <TouchableOpacity
-                    onPress={() => {
-                      if (countdownRef.current) clearInterval(countdownRef.current);
-                      const s = pendingScores!;
-                      setPendingScores(null);
-                      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                      _commitLocalRound(s);
-                    }}
-                    style={[styles.acBtn, { backgroundColor: `${colors.gold}22`, borderColor: `${colors.gold}55` }]}
+                    onPress={handleAcApprove}
+                    style={[styles.acBtn, { backgroundColor: `${colors.success}22`, borderColor: `${colors.success}55` }]}
                   >
-                    <Text style={[styles.acBtnText, { color: colors.gold }]}>✅ موافق</Text>
+                    <Text style={[styles.acBtnText, { color: colors.success }]}>✅ موافق</Text>
+                    {acApprovals > 0 && (
+                      <Text style={[styles.acBtnCount, { color: colors.success }]}>×{acApprovals}</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
               </>
@@ -1071,9 +1158,16 @@ const styles = StyleSheet.create({
   acCountdown: { borderRadius: 50, width: 72, height: 72, alignItems: "center", justifyContent: "center", borderWidth: 2, gap: 2 },
   acCountdownNum: { fontSize: 26 },
   acCountdownLabel: { fontFamily: Fonts.body, fontSize: 10, textAlign: "center" },
+  acVoteTally: { flexDirection: "row", borderRadius: 14, borderWidth: 1, overflow: "hidden", width: "100%" },
+  acVoteCount: { flex: 1, alignItems: "center", paddingVertical: 10, gap: 4 },
+  acVoteNum: { fontFamily: Fonts.heading, fontSize: 24 },
+  acVoteLabel: { fontFamily: Fonts.body, fontSize: 11 },
+  acVoteDivider: { width: 1 },
   acBtns: { flexDirection: "row", gap: 10, width: "100%" },
-  acBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: "center", borderWidth: 1 },
+  acBtn: { flex: 1, paddingVertical: 13, borderRadius: 14, alignItems: "center", borderWidth: 1, gap: 2 },
   acBtnText: { fontFamily: Fonts.heading, fontSize: 15 },
+  acBtnCount: { fontFamily: Fonts.body, fontSize: 11 },
+  acFlashOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 10, pointerEvents: "none" } as const,
   // Debt tracker in winner
   debtSection: { width: "100%", borderRadius: 16, padding: 14, gap: 10 },
   debtTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "center" },
