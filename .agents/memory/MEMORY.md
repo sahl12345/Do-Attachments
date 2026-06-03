@@ -1,2 +1,3 @@
 - [Tarneeb scoring convention](tarneeb-scoring.md) — teams are players[0]+[2] vs players[1]+[3] (partners across); display grid rows are [0,1] and [2,3]
-- [Score entry game routing](score-entry-routing.md) — ScoreEntryModal is game-aware: tarneeb/tarneeb_sy → TarneebEntry, terkis variants → TerkisEntry, all others → GenericEntry
+- [Score entry game routing](score-entry-routing.md) — ScoreEntryModal routes: tarneeb/tarneeb_sy→TarneebEntry, terkis/terkis_team→TerkisEntry, terkis_complex→TerkisComplexEntry (king+mamlaka), hand→HandEntry, baloot/basra/leekha/domino/jackaroo/jackaroo_cx/harreega/nthaleh/400→dedicated entries, else→GenericEntry
+- [Online AC voting flow](online-ac-voting.md) — pendingRound field in DB; POST /api/online/:code/vote; mobile polls and shows voting modal; voteOnlineRoundRef tracks per-round vote; syncOnline detects round-count change to flash green/red

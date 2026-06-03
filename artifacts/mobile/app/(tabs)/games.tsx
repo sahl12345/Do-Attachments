@@ -1,4 +1,6 @@
 import { Feather } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   Modal,
@@ -36,6 +38,7 @@ function DifficultyDots({ difficulty, color }: { difficulty: number; color: stri
 
 export default function GamesScreen() {
   const colors = useColors();
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
   const webTop = Platform.OS === "web" ? 67 : 0;
@@ -157,6 +160,25 @@ export default function GamesScreen() {
                 </Text>
               </View>
             </ScrollView>
+
+            {/* العب هلق CTA */}
+            <View style={styles.ctaRow}>
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  setSelectedGame(null);
+                  router.push({
+                    pathname: "/session/new",
+                    params: { gameId: selectedGame.id },
+                  });
+                }}
+                style={[styles.ctaBtn, { backgroundColor: colors.gold }]}
+              >
+                <Text style={[styles.ctaBtnText, { color: colors.background }]}>
+                  العب هلق ⚡
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </Modal>
@@ -209,6 +231,9 @@ const infoStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16 },
+  ctaRow: { paddingHorizontal: 20, paddingVertical: 16, paddingBottom: 28 },
+  ctaBtn: { borderRadius: 16, paddingVertical: 16, alignItems: "center" },
+  ctaBtnText: { fontFamily: Fonts.heading, fontSize: 18 },
   title: {
     fontFamily: Fonts.heading,
     fontSize: 28,

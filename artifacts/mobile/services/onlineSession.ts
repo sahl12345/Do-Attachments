@@ -15,6 +15,14 @@ export interface OnlineRound {
   id: string;
   scores: Record<string, number>;
   timestamp: number;
+  recordedBy?: string;
+}
+
+export interface PendingRound {
+  round: OnlineRound;
+  approvals: string[];
+  rejections: string[];
+  expiresAt: number;
 }
 
 export interface OnlineSessionData {
@@ -23,6 +31,9 @@ export interface OnlineSessionData {
   players: OnlinePlayer[];
   rounds: OnlineRound[];
   targetScore: number;
+  antiCheat?: boolean;
+  antiCheatTimeout?: number;
+  pendingRound?: PendingRound | null;
   createdAt: number;
   startedAt?: number;
   completedAt?: number;
@@ -54,9 +65,11 @@ async function get<T>(path: string): Promise<T> {
 export async function createOnlineSession(
   gameId: string,
   targetScore: number,
-  hostName: string
+  hostName: string,
+  antiCheat?: boolean,
+  antiCheatTimeout?: number
 ): Promise<{ code: string; hostPlayerId: string }> {
-  return post("", { gameId, targetScore, hostName });
+  return post("", { gameId, targetScore, hostName, antiCheat, antiCheatTimeout });
 }
 
 export async function getOnlineSession(
@@ -79,12 +92,13 @@ export async function startOnlineSession(
   return post(`/${code}/start`, { hostPlayerId });
 }
 
+// Any player can record a round
 export async function addOnlineRound(
   code: string,
-  hostPlayerId: string,
+  playerId: string,
   scores: Record<string, number>
 ): Promise<OnlineSessionData> {
-  return post(`/${code}/round`, { hostPlayerId, scores });
+  return post(`/${code}/round`, { playerId, scores });
 }
 
 export async function undoOnlineRound(
@@ -94,10 +108,20 @@ export async function undoOnlineRound(
   return post(`/${code}/undo`, { hostPlayerId });
 }
 
+// Any player can complete the session
 export async function completeOnlineSession(
   code: string,
-  hostPlayerId: string,
+  playerId: string,
   winnerId: string
 ): Promise<OnlineSessionData> {
-  return post(`/${code}/complete`, { hostPlayerId, winnerId });
+  return post(`/${code}/complete`, { playerId, winnerId });
+}
+
+// Vote on a pending round (anti-cheat)
+export async function voteOnlineRound(
+  code: string,
+  playerId: string,
+  vote: "approve" | "reject"
+): Promise<OnlineSessionData & { voteResult?: "approved" | "rejected" | "pending" }> {
+  return post(`/${code}/vote`, { playerId, vote });
 }

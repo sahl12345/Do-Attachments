@@ -1,66 +1,51 @@
+import { eq, lt } from "drizzle-orm";
 import { Router, type IRouter } from "express";
+import { db, onlineSessionsTable, type OnlinePlayer, type OnlineRound, type PendingRound } from "@workspace/db";
 
 const router: IRouter = Router();
 
-interface OnlinePlayer {
-  id: string;
-  name: string;
-  isHost: boolean;
-}
-
-interface RoundScore {
-  [playerId: string]: number;
-}
-
-interface OnlineRound {
-  id: string;
-  scores: RoundScore;
-  timestamp: number;
-}
-
-interface OnlineSession {
-  code: string;
-  gameId: string;
-  players: OnlinePlayer[];
-  rounds: OnlineRound[];
-  targetScore: number;
-  createdAt: number;
-  startedAt?: number;
-  completedAt?: number;
-  winnerId?: string;
-}
-
-const sessions = new Map<string, OnlineSession>();
-
 function generateCode(): string {
-  let code: string;
-  do {
-    code = Math.floor(100000 + Math.random() * 900000).toString();
-  } while (sessions.has(code));
-  return code;
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
 }
 
-// Clean up sessions older than 24 hours
-setInterval(() => {
-  const now = Date.now();
-  for (const [code, session] of sessions.entries()) {
-    if (now - session.createdAt > 24 * 60 * 60 * 1000) {
-      sessions.delete(code);
-    }
-  }
+async function getSession(code: string) {
+  const rows = await db
+    .select()
+    .from(onlineSessionsTable)
+    .where(eq(onlineSessionsTable.code, code));
+  return rows[0] ?? null;
+}
+
+function getPlayers(session: NonNullable<Awaited<ReturnType<typeof getSession>>>): OnlinePlayer[] {
+  return session.players as OnlinePlayer[];
+}
+
+function getRounds(session: NonNullable<Awaited<ReturnType<typeof getSession>>>): OnlineRound[] {
+  return session.rounds as OnlineRound[];
+}
+
+// Clean up sessions older than 24h — runs every hour
+setInterval(async () => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  await db
+    .delete(onlineSessionsTable)
+    .where(lt(onlineSessionsTable.createdAt, cutoff));
 }, 60 * 60 * 1000);
 
-// POST /api/online - Create online session
-router.post("/online", (req, res) => {
-  const { gameId, targetScore, hostName } = req.body as {
-    gameId: string;
-    targetScore: number;
-    hostName: string;
-  };
+// POST /api/online — Create session
+router.post("/online", async (req, res) => {
+  const { gameId, targetScore, hostName, antiCheat, antiCheatTimeout } =
+    req.body as {
+      gameId: string;
+      targetScore: number;
+      hostName: string;
+      antiCheat?: boolean;
+      antiCheatTimeout?: number;
+    };
 
   if (!gameId || !hostName) {
     res.status(400).json({ error: "gameId and hostName required" });
@@ -70,23 +55,23 @@ router.post("/online", (req, res) => {
   const code = generateCode();
   const hostId = generateId();
 
-  const session: OnlineSession = {
+  await db.insert(onlineSessionsTable).values({
     code,
     gameId,
     players: [{ id: hostId, name: hostName, isHost: true }],
     rounds: [],
     targetScore: targetScore ?? 41,
+    antiCheat: antiCheat ?? false,
+    antiCheatTimeout: antiCheatTimeout ?? 10,
     createdAt: Date.now(),
-  };
-
-  sessions.set(code, session);
+  });
 
   res.json({ code, hostPlayerId: hostId });
 });
 
-// GET /api/online/:code - Get session
-router.get("/online/:code", (req, res) => {
-  const session = sessions.get(req.params.code);
+// GET /api/online/:code — Get session
+router.get("/online/:code", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
@@ -94,9 +79,9 @@ router.get("/online/:code", (req, res) => {
   res.json(session);
 });
 
-// POST /api/online/:code/join - Join session
-router.post("/online/:code/join", (req, res) => {
-  const session = sessions.get(req.params.code);
+// POST /api/online/:code/join — Join session
+router.post("/online/:code/join", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
@@ -105,7 +90,8 @@ router.post("/online/:code/join", (req, res) => {
     res.status(400).json({ error: "Session already started" });
     return;
   }
-  if (session.players.length >= 6) {
+  const players = getPlayers(session);
+  if (players.length >= 6) {
     res.status(400).json({ error: "Session is full" });
     return;
   }
@@ -117,48 +103,67 @@ router.post("/online/:code/join", (req, res) => {
   }
 
   const playerId = generateId();
-  session.players.push({ id: playerId, name, isHost: false });
-  res.json({ playerId, session });
+  const newPlayers: OnlinePlayer[] = [
+    ...players,
+    { id: playerId, name, isHost: false },
+  ];
+
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ players: newPlayers })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+
+  res.json({ playerId, session: updated });
 });
 
-// POST /api/online/:code/start - Start session (host only)
-router.post("/online/:code/start", (req, res) => {
-  const session = sessions.get(req.params.code);
+// POST /api/online/:code/start — Start session (host only)
+router.post("/online/:code/start", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
   }
 
   const { hostPlayerId } = req.body as { hostPlayerId: string };
-  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
+  const startPlayers = getPlayers(session);
+  const host = startPlayers.find((p) => p.id === hostPlayerId && p.isHost);
   if (!host) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
-  if (session.players.length < 2) {
+  if (startPlayers.length < 2) {
     res.status(400).json({ error: "Need at least 2 players" });
     return;
   }
 
-  session.startedAt = Date.now();
-  res.json(session);
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ startedAt: Date.now() })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+
+  res.json(updated);
 });
 
-// POST /api/online/:code/round - Add round (host only)
-router.post("/online/:code/round", (req, res) => {
-  const session = sessions.get(req.params.code);
+// POST /api/online/:code/round — Add round (any player)
+// If anti-cheat is enabled, stores as pendingRound instead of committing directly
+router.post("/online/:code/round", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
   }
 
-  const { hostPlayerId, scores } = req.body as {
-    hostPlayerId: string;
-    scores: RoundScore;
+  const { playerId, scores } = req.body as {
+    playerId: string;
+    scores: Record<string, number>;
   };
-  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
-  if (!host) {
-    res.status(403).json({ error: "Not authorized" });
+
+  const roundPlayers = getPlayers(session);
+  const isPlayer = roundPlayers.some((p) => p.id === playerId);
+  if (!isPlayer) {
+    res.status(403).json({ error: "Not a player in this session" });
     return;
   }
 
@@ -166,53 +171,162 @@ router.post("/online/:code/round", (req, res) => {
     id: generateId(),
     scores,
     timestamp: Date.now(),
+    recordedBy: playerId,
   };
-  session.rounds.push(round);
-  res.json(session);
+
+  // Anti-cheat: store as pending, require majority vote
+  if (session.antiCheat) {
+    const timeoutMs = (session.antiCheatTimeout ?? 10) * 1000;
+    const pending: PendingRound = {
+      round,
+      approvals: [],
+      rejections: [],
+      expiresAt: Date.now() + timeoutMs,
+    };
+    const [updated] = await db
+      .update(onlineSessionsTable)
+      .set({ pendingRound: pending })
+      .where(eq(onlineSessionsTable.code, req.params.code))
+      .returning();
+    res.json(updated);
+    return;
+  }
+
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ rounds: [...getRounds(session), round] })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+
+  res.json(updated);
 });
 
-// POST /api/online/:code/undo - Undo last round (host only)
-router.post("/online/:code/undo", (req, res) => {
-  const session = sessions.get(req.params.code);
+// POST /api/online/:code/vote — Cast vote on pending round
+router.post("/online/:code/vote", async (req, res) => {
+  const session = await getSession(req.params.code);
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  const { playerId, vote } = req.body as {
+    playerId: string;
+    vote: "approve" | "reject";
+  };
+
+  const votePlayers = getPlayers(session);
+  const isPlayer = votePlayers.some((p) => p.id === playerId);
+  if (!isPlayer) {
+    res.status(403).json({ error: "Not a player in this session" });
+    return;
+  }
+
+  const pending = session.pendingRound as PendingRound | null;
+  if (!pending) {
+    res.status(400).json({ error: "No pending round" });
+    return;
+  }
+
+  const majority = Math.ceil(votePlayers.length / 2);
+  const approvals = pending.approvals.includes(playerId)
+    ? pending.approvals
+    : vote === "approve"
+    ? [...pending.approvals, playerId]
+    : pending.approvals;
+  const rejections = pending.rejections.includes(playerId)
+    ? pending.rejections
+    : vote === "reject"
+    ? [...pending.rejections, playerId]
+    : pending.rejections;
+
+  // Check timeout auto-approve
+  const isExpired = Date.now() >= pending.expiresAt;
+
+  if (approvals.length >= majority || isExpired) {
+    // Commit the round
+    const [updated] = await db
+      .update(onlineSessionsTable)
+      .set({ rounds: [...getRounds(session), pending.round], pendingRound: null })
+      .where(eq(onlineSessionsTable.code, req.params.code))
+      .returning();
+    res.json({ ...updated, voteResult: "approved" });
+    return;
+  }
+
+  if (rejections.length >= majority) {
+    // Reject — discard pending round
+    const [updated] = await db
+      .update(onlineSessionsTable)
+      .set({ pendingRound: null })
+      .where(eq(onlineSessionsTable.code, req.params.code))
+      .returning();
+    res.json({ ...updated, voteResult: "rejected" });
+    return;
+  }
+
+  // Still voting — update tally
+  const updatedPending: PendingRound = { ...pending, approvals, rejections };
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ pendingRound: updatedPending })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+  res.json({ ...updated, voteResult: "pending" });
+});
+
+// POST /api/online/:code/undo — Undo last round (host only)
+router.post("/online/:code/undo", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
   }
 
   const { hostPlayerId } = req.body as { hostPlayerId: string };
-  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
+  const undoPlayers = getPlayers(session);
+  const host = undoPlayers.find((p) => p.id === hostPlayerId && p.isHost);
   if (!host) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
 
-  session.rounds.pop();
-  session.completedAt = undefined;
-  session.winnerId = undefined;
-  res.json(session);
+  const newRounds = getRounds(session).slice(0, -1);
+
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ rounds: newRounds, completedAt: null, winnerId: null })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+
+  res.json(updated);
 });
 
-// POST /api/online/:code/complete - Mark session complete (host only)
-router.post("/online/:code/complete", (req, res) => {
-  const session = sessions.get(req.params.code);
+// POST /api/online/:code/complete — Mark complete
+router.post("/online/:code/complete", async (req, res) => {
+  const session = await getSession(req.params.code);
   if (!session) {
     res.status(404).json({ error: "Session not found" });
     return;
   }
 
-  const { hostPlayerId, winnerId } = req.body as {
-    hostPlayerId: string;
+  const { playerId, winnerId } = req.body as {
+    playerId: string;
     winnerId: string;
   };
-  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
-  if (!host) {
+  const completePlayers = getPlayers(session);
+  const isPlayer = completePlayers.some((p) => p.id === playerId);
+  if (!isPlayer) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
 
-  session.completedAt = Date.now();
-  session.winnerId = winnerId;
-  res.json(session);
+  const [updated] = await db
+    .update(onlineSessionsTable)
+    .set({ completedAt: Date.now(), winnerId })
+    .where(eq(onlineSessionsTable.code, req.params.code))
+    .returning();
+
+  res.json(updated);
 });
 
 export default router;

@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -54,6 +54,23 @@ export default function NewSessionScreen() {
     setGameRules((prev) => ({ ...prev, [key]: val }));
   const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
+  const { gameId: preselectedGameId } = useLocalSearchParams<{ gameId?: string }>();
+
+  // Auto-select game + skip to players step when launched via "العب هلق"
+  useEffect(() => {
+    if (!preselectedGameId) return;
+    const game = GAMES.find((g) => g.id === preselectedGameId);
+    if (!game) return;
+    setMode("local");
+    setSelectedGame(game);
+    setTargetScore(game.defaultTarget);
+    const count = Math.max(game.minPlayers, 2);
+    setPlayers(Array.from({ length: count }, (_, i) => players[i] ?? ""));
+    const half = Math.ceil(count / 2);
+    setTeamAssignment(Array.from({ length: count }, (_, i) => (i < half ? 0 : 1)));
+    setStep(2); // jump directly to players step
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectedGameId]);
 
   const isTeamLocalGame = mode === "local" && selectedGame?.isTeam === true;
   const settingsStep = isTeamLocalGame ? 4 : 3;
@@ -182,7 +199,9 @@ export default function NewSessionScreen() {
       const { code, hostPlayerId } = await createOnlineSession(
         selectedGame.id,
         targetScore || selectedGame.defaultTarget,
-        hostName.trim()
+        hostName.trim(),
+        antiCheat || undefined,
+        antiCheat ? acTimeoutSecs : undefined
       );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({

@@ -35,6 +35,7 @@ import {
   getOnlineSession,
   startOnlineSession,
   undoOnlineRound,
+  voteOnlineRound,
 } from "@/services/onlineSession";
 import { useColors } from "@/hooks/useColors";
 
@@ -153,30 +154,6 @@ export default function SessionScreen() {
   const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
   const localGame = localSession ? getGameById(localSession.gameId) : null;
 
-  // ── online polling ─────────────────────────────────────────────────────────
-  const syncOnline = useCallback(async () => {
-    if (!code) return;
-    try {
-      const data = await getOnlineSession(code);
-      setOnlineSession((prev) => {
-        if (
-          !prev?.completedAt &&
-          data.completedAt &&
-          data.winnerId
-        ) {
-          setTimeout(() => setShowWinner(true), 300);
-        }
-        return data;
-      });
-    } catch (_e) {}
-  }, [code]);
-
-  useEffect(() => {
-    if (!isOnline) return;
-    syncOnline();
-    const interval = setInterval(syncOnline, 2000);
-    return () => clearInterval(interval);
-  }, [isOnline, syncOnline]);
 
   useEffect(() => {
     if (showWinner) {
@@ -347,15 +324,78 @@ export default function SessionScreen() {
     }
   };
 
+  // Current player ID — either host key or joined player id
+  const myOnlinePlayerId = hostKey ?? playerId;
+
+  // ── online polling & AC voting ──────────────────────────────────────────────
+  const [onlineAcCountdown, setOnlineAcCountdown] = useState(0);
+  const onlineVotedRoundRef = useRef<string | null>(null);
+  const onlineHasVoted = onlineSession?.pendingRound
+    ? onlineVotedRoundRef.current === onlineSession.pendingRound.round.id
+    : false;
+
+  const syncOnline = useCallback(async () => {
+    if (!code) return;
+    try {
+      const data = await getOnlineSession(code);
+      setOnlineSession((prev) => {
+        if (prev?.pendingRound && !data.pendingRound) {
+          const prevCount = prev.rounds.length;
+          const newCount = data.rounds.length;
+          if (newCount > prevCount) doAcFlash("green");
+          else doAcFlash("red");
+          onlineVotedRoundRef.current = null;
+        }
+        if (!prev?.completedAt && data.completedAt && data.winnerId) {
+          setTimeout(() => setShowWinner(true), 300);
+        }
+        return data;
+      });
+    } catch (_e) {}
+  }, [code, doAcFlash]);
+
+  useEffect(() => {
+    if (!isOnline) return;
+    syncOnline();
+    const interval = setInterval(syncOnline, 2000);
+    return () => clearInterval(interval);
+  }, [isOnline, syncOnline]);
+
+  const handleOnlineVote = useCallback(async (vote: "approve" | "reject") => {
+    if (!code || !myOnlinePlayerId || !onlineSession?.pendingRound) return;
+    const roundId = onlineSession.pendingRound.round.id;
+    onlineVotedRoundRef.current = roundId;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const result = await voteOnlineRound(code, myOnlinePlayerId, vote);
+      if (result.voteResult === "approved") doAcFlash("green");
+      else if (result.voteResult === "rejected") doAcFlash("red");
+      setOnlineSession(result);
+    } catch (_e) {}
+  }, [code, myOnlinePlayerId, onlineSession, doAcFlash]);
+
+  // Online AC countdown timer (computed from server expiresAt)
+  useEffect(() => {
+    const pr = onlineSession?.pendingRound;
+    if (!pr) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((pr.expiresAt - Date.now()) / 1000));
+      setOnlineAcCountdown(remaining);
+    };
+    tick();
+    const t = setInterval(tick, 500);
+    return () => clearInterval(t);
+  }, [onlineSession?.pendingRound]);
+
   const handleAddOnlineRound = async (scores: Record<string, number>) => {
-    if (!code || !hostKey || !onlineSession) return;
+    if (!code || !myOnlinePlayerId || !onlineSession) return;
     setShowScoreModal(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const data = await addOnlineRound(code, hostKey, scores);
+      const data = await addOnlineRound(code, myOnlinePlayerId, scores);
       const winnerId = checkOnlineWinner(data);
       if (winnerId) {
-        const completed = await completeOnlineSession(code, hostKey, winnerId);
+        const completed = await completeOnlineSession(code, myOnlinePlayerId, winnerId);
         setOnlineSession(completed);
         setTimeout(() => setShowWinner(true), 300);
       } else {
@@ -571,7 +611,10 @@ export default function SessionScreen() {
     ? sessionPlayers.find((p) => p.id === sessionWinnerId)
     : null;
 
-  const canAddRound = isOnline ? isHost : true;
+  // Any player in the online session can record rounds
+  const canAddRound = isOnline
+    ? !!onlineSession && onlineSession.players.some((p) => p.id === myOnlinePlayerId)
+    : true;
   const isComplete = !!(session?.completedAt);
   const isFourPlayer = sessionPlayers.length === 4;
   const isTwoPlayer = sessionPlayers.length === 2;
@@ -646,16 +689,16 @@ export default function SessionScreen() {
         </View>
       )}
 
-      {isOnline && !isHost && !isComplete && (
+      {isOnline && !isComplete && (
         <View
           style={[
             styles.watcherBanner,
             { backgroundColor: `${colors.gold}15`, borderColor: `${colors.gold}30` },
           ]}
         >
-          <Feather name="eye" size={14} color={colors.gold} />
+          <Feather name="wifi" size={14} color={colors.gold} />
           <Text style={[styles.watcherText, { color: colors.gold }]}>
-            أنت مشاهد — فقط المضيف يقدر يضيف جولات
+            {isHost ? "أنت المضيف 👑" : "أي لاعب يقدر يسجّل الجولة"}
           </Text>
         </View>
       )}
@@ -922,6 +965,95 @@ export default function SessionScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Online Anti-cheat voting modal */}
+      {isOnline && (() => {
+        const pr = onlineSession?.pendingRound;
+        if (!pr) return null;
+        const onlineAcApprovals = pr.approvals.length;
+        const onlineAcRejections = pr.rejections.length;
+        const onlineMajority = Math.ceil(sessionPlayers.length / 2);
+        const recorderName = sessionPlayers.find(p => p.id === pr.round.recordedBy)?.name ?? "اللاعب";
+        return (
+          <Modal visible animationType="fade" transparent statusBarTranslucent>
+            <View style={styles.acOverlay}>
+              <View style={[styles.acCard, {
+                backgroundColor: colors.surfaceHigh,
+                borderColor: onlineAcApprovals > 0 ? colors.success : colors.borderStrong,
+              }]}>
+                <Text style={styles.acEmoji}>👀</Text>
+                <Text style={[styles.acTitle, { color: colors.text }]}>هالجولة صح؟</Text>
+                <Text style={[styles.acMsg, { color: colors.textMuted }]}>
+                  سجّلها {recorderName} · تأكيد من الأغلبية ({onlineMajority} من {sessionPlayers.length})
+                </Text>
+
+                {/* Score preview */}
+                <View style={styles.acScores}>
+                  {sessionPlayers.map((p) => {
+                    const sc = pr.round.scores[p.id] ?? 0;
+                    return (
+                      <View key={p.id} style={[styles.acScoreRow, { backgroundColor: colors.surface }]}>
+                        <Text style={[styles.acScore, {
+                          color: sc > 0 ? colors.success : sc < 0 ? colors.red : colors.textDim,
+                          fontFamily: "IBMPlexMono_400Regular",
+                        }]}>
+                          {sc >= 0 ? `+${sc}` : `${sc}`}
+                        </Text>
+                        <Text style={[styles.acPlayerName, { color: colors.text }]}>{p.name}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                {/* Vote tally */}
+                <View style={[styles.acVoteTally, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <View style={styles.acVoteCount}>
+                    <Text style={[styles.acVoteNum, { color: colors.success }]}>{onlineAcApprovals}</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ موافقة</Text>
+                  </View>
+                  <View style={[styles.acVoteDivider, { backgroundColor: colors.border }]} />
+                  <View style={styles.acVoteCount}>
+                    <Text style={[styles.acVoteNum, { color: colors.red }]}>{onlineAcRejections}</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>❌ اعتراض</Text>
+                  </View>
+                </View>
+
+                {/* Countdown */}
+                <View style={[styles.acCountdown, { borderColor: onlineAcCountdown <= 3 ? colors.red : colors.borderStrong }]}>
+                  <Text style={[styles.acCountdownNum, {
+                    color: onlineAcCountdown <= 3 ? colors.red : colors.gold,
+                    fontFamily: "IBMPlexMono_400Regular",
+                  }]}>
+                    {onlineAcCountdown}
+                  </Text>
+                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تأكيد تلقائي</Text>
+                </View>
+
+                {onlineHasVoted ? (
+                  <Text style={[styles.acMsg, { color: colors.textMuted, marginTop: 8 }]}>
+                    ✔ صوّتت · بانتظار باقي اللاعبين…
+                  </Text>
+                ) : (
+                  <View style={styles.acBtns}>
+                    <TouchableOpacity
+                      onPress={() => handleOnlineVote("reject")}
+                      style={[styles.acBtn, { backgroundColor: `${colors.red}22`, borderColor: `${colors.red}55` }]}
+                    >
+                      <Text style={[styles.acBtnText, { color: colors.red }]}>❌ اعتراض</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleOnlineVote("approve")}
+                      style={[styles.acBtn, { backgroundColor: `${colors.success}22`, borderColor: `${colors.success}55` }]}
+                    >
+                      <Text style={[styles.acBtnText, { color: colors.success }]}>✅ موافق</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+            </View>
+          </Modal>
+        );
+      })()}
 
       <Modal visible={showWinner} animationType="none" transparent statusBarTranslucent>
         <View style={styles.winnerOverlay}>
