@@ -18,7 +18,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Fonts } from "@/constants/fonts";
-import { Player } from "@/contexts/AppContext";
+import { GameRules, Player } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -28,6 +28,7 @@ interface Props {
   players: Player[];
   roundNumber: number;
   gameId?: string;
+  rules?: GameRules;
   onClose: () => void;
   onSubmit: (scores: Record<string, number>) => void;
 }
@@ -108,20 +109,23 @@ const actStyles = StyleSheet.create({
 });
 
 // ─── TARNEEB ENTRY ────────────────────────────────────────────────────────────
-function TarneebEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit: (s: Record<string, number>) => void; onClose: () => void }) {
+function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]; rules?: GameRules; onSubmit: (s: Record<string, number>) => void; onClose: () => void }) {
   const colors = useColors();
   const [biddingTeam, setBiddingTeam] = useState<0 | 1>(0);
-  const [bid, setBid] = useState(7);
-  const [tricks, setTricks] = useState(7);
+  const minBid = rules?.minBid ?? 7;
+  const [bid, setBid] = useState(minBid);
+  const [tricks, setTricks] = useState(minBid);
   const [kabout, setKabout] = useState(false);
 
   const teamA = [players[0], players[2]].filter(Boolean);
   const teamB = [players[1], players[3]].filter(Boolean);
 
   const otherTricks = 13 - tricks;
+  const failScore = (rules?.penaltyOnFail ?? true) ? -bid : 0;
+  const successScore = (rules?.doubleBid && tricks === bid) ? bid * 2 : tricks;
   const biddingScore = kabout
     ? bid === 13 ? 26 : 16
-    : tricks >= bid ? tricks : -bid;
+    : tricks >= bid ? successScore : failScore;
   const otherScore = kabout ? 0 : otherTricks;
   const aScore = biddingTeam === 0 ? biddingScore : otherScore;
   const bScore = biddingTeam === 1 ? biddingScore : otherScore;
@@ -157,9 +161,9 @@ function TarneebEntry({ players, onSubmit, onClose }: { players: Player[]; onSub
 
       {!kabout && (
         <>
-          <Text style={[s.label, { color: colors.textMuted }]}>المزايدة</Text>
+          <Text style={[s.label, { color: colors.textMuted }]}>المزايدة (الحد الأدنى: {minBid})</Text>
           <View style={s.centered}>
-            <Stepper value={bid} onChange={setBid} min={6} max={13} colors={colors} />
+            <Stepper value={bid} onChange={setBid} min={minBid} max={13} colors={colors} />
           </View>
 
           <Text style={[s.label, { color: colors.textMuted }]}>لطشات الفريق المزايد</Text>
@@ -646,7 +650,7 @@ const s = StyleSheet.create({
 });
 
 // ─── SHELL ────────────────────────────────────────────────────────────────────
-export function ScoreEntryModal({ visible, players, roundNumber, gameId, onClose, onSubmit }: Props) {
+export function ScoreEntryModal({ visible, players, roundNumber, gameId, rules, onClose, onSubmit }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -688,7 +692,7 @@ export function ScoreEntryModal({ visible, players, roundNumber, gameId, onClose
         <Text style={[shellStyles.title, { color: colors.text }]}>{title}</Text>
 
         {isTarneeb ? (
-          <TarneebEntry players={players} onSubmit={onSubmit} onClose={onClose} />
+          <TarneebEntry players={players} rules={rules} onSubmit={onSubmit} onClose={onClose} />
         ) : isTerkis ? (
           <TerkisEntry players={players} onSubmit={onSubmit} onClose={onClose} />
         ) : isHand ? (

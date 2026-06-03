@@ -200,14 +200,23 @@ export default function SessionScreen() {
 
   const getLocalWinnerId = (s: Session): string | null => {
     if (!localGame || localGame.defaultTarget === 0) return null;
+    const maxRounds = s.rules?.maxRounds ?? 0;
+    // maxRounds end: find best scorer
+    if (maxRounds > 0 && s.rounds.length >= maxRounds) {
+      const scored = s.players.map((p) => ({ id: p.id, total: getTotalScore(s, p.id) }));
+      if (localGame.lowerIsBetter) {
+        return scored.reduce((a, b) => a.total <= b.total ? a : b).id;
+      }
+      return scored.reduce((a, b) => a.total >= b.total ? a : b).id;
+    }
     if (localGame.lowerIsBetter) {
       const elim = s.players.find(
-        (p) => getTotalScore(s, p.id) >= (localGame.eliminationScore ?? localGame.defaultTarget)
+        (p) => getTotalScore(s, p.id) >= (localGame.eliminationScore ?? s.targetScore)
       );
       return elim?.id ?? null;
     }
     const winner = s.players.find(
-      (p) => getTotalScore(s, p.id) >= localGame.defaultTarget
+      (p) => getTotalScore(s, p.id) >= s.targetScore
     );
     return winner?.id ?? null;
   };
@@ -754,6 +763,7 @@ export default function SessionScreen() {
         players={sessionPlayers as { id: string; name: string }[]}
         roundNumber={sessionRounds.length + 1}
         gameId={session?.gameId}
+        rules={localSession?.rules}
         onClose={() => setShowScoreModal(false)}
         onSubmit={handleAddRound}
       />

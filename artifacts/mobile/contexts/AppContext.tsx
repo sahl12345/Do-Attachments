@@ -27,6 +27,13 @@ export interface Round {
   timestamp: number;
 }
 
+export interface GameRules {
+  minBid?: number;         // tarneeb: minimum bid allowed (default 7)
+  penaltyOnFail?: boolean; // tarneeb: deduct bid on failure — true = current behavior
+  doubleBid?: boolean;     // tarneeb: double points when exactly hitting bid
+  maxRounds?: number;      // all games: end game after N rounds (0 = unlimited)
+}
+
 export interface Session {
   id: string;
   gameId: string;
@@ -38,6 +45,7 @@ export interface Session {
   winnerId?: string;
   antiCheat?: boolean;
   debtPerPoint?: number;
+  rules?: GameRules;
 }
 
 interface AppContextType {

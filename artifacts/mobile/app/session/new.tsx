@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GameCard } from "@/components/GameCard";
 import { Fonts } from "@/constants/fonts";
 import { GAMES, GameDef } from "@/constants/games";
-import { Session, generateId, useApp } from "@/contexts/AppContext";
+import { GameRules, Session, generateId, useApp } from "@/contexts/AppContext";
 import { createOnlineSession } from "@/services/onlineSession";
 import { useColors } from "@/hooks/useColors";
 
@@ -48,6 +48,9 @@ export default function NewSessionScreen() {
   const [antiCheat, setAntiCheat] = useState(false);
   const [debtEnabled, setDebtEnabled] = useState(false);
   const [debtPerPoint, setDebtPerPoint] = useState("0.10");
+  const [gameRules, setGameRules] = useState<GameRules>({});
+  const setRule = <K extends keyof GameRules>(key: K, val: GameRules[K]) =>
+    setGameRules((prev) => ({ ...prev, [key]: val }));
   const [creatingOnline, setCreatingOnline] = useState(false);
   const webTop = Platform.OS === "web" ? 67 : 0;
 
@@ -149,6 +152,11 @@ export default function NewSessionScreen() {
       name: p.name,
     }));
 
+    const cleanRules: GameRules = {};
+    if (gameRules.minBid !== undefined) cleanRules.minBid = gameRules.minBid;
+    if (gameRules.penaltyOnFail !== undefined) cleanRules.penaltyOnFail = gameRules.penaltyOnFail;
+    if (gameRules.doubleBid) cleanRules.doubleBid = gameRules.doubleBid;
+    if (gameRules.maxRounds) cleanRules.maxRounds = gameRules.maxRounds;
     const session: Session = {
       id: generateId(),
       gameId: selectedGame.id,
@@ -158,6 +166,7 @@ export default function NewSessionScreen() {
       createdAt: Date.now(),
       antiCheat: antiCheat || undefined,
       debtPerPoint: debtEnabled ? parseFloat(debtPerPoint) || 0.1 : undefined,
+      rules: Object.keys(cleanRules).length > 0 ? cleanRules : undefined,
     };
     addSession(session);
     router.replace(`/session/${session.id}`);
@@ -632,6 +641,116 @@ export default function NewSessionScreen() {
               </View>
             </View>
 
+            {/* ─── Game Rules ─────────────────────────────── */}
+            {mode === "local" && selectedGame && (
+              <View style={styles.settingBlock}>
+                <Text style={[styles.settingLabel, { color: colors.text }]}>⚙️ قواعد اللعبة</Text>
+
+                {/* Tarneeb-specific rules */}
+                {(selectedGame.id === "tarneeb" || selectedGame.id === "tarneeb_sy") && (
+                  <View style={[styles.rulesCard, { backgroundColor: colors.surface }]}>
+                    {/* Min bid */}
+                    <View style={[styles.ruleRow, { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                      <View style={styles.ruleLeft}>
+                        <Text style={[styles.ruleLabel, { color: colors.text }]}>أقل مزايدة مسموح</Text>
+                        <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                          الحد الأدنى للمزايدة (الآن: {gameRules.minBid ?? 7})
+                        </Text>
+                      </View>
+                      <View style={styles.ruleStepperRow}>
+                        {[5, 6, 7, 8, 9].map((v) => (
+                          <TouchableOpacity
+                            key={v}
+                            onPress={() => { setRule("minBid", v); Haptics.selectionAsync(); }}
+                            style={[
+                              styles.ruleStepBtn,
+                              {
+                                backgroundColor: (gameRules.minBid ?? 7) === v ? colors.gold : colors.surfaceRaised,
+                                borderColor: (gameRules.minBid ?? 7) === v ? colors.gold : colors.border,
+                              },
+                            ]}
+                          >
+                            <Text style={[styles.ruleStepBtnText, { color: (gameRules.minBid ?? 7) === v ? colors.background : colors.textMuted }]}>
+                              {v}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+
+                    {/* Penalty on fail */}
+                    <TouchableOpacity
+                      onPress={() => { setRule("penaltyOnFail", !(gameRules.penaltyOnFail ?? true)); Haptics.selectionAsync(); }}
+                      style={[styles.ruleRow, { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+                    >
+                      <View style={styles.ruleLeft}>
+                        <Text style={[styles.ruleLabel, { color: colors.text }]}>عقوبة الفشل</Text>
+                        <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                          {(gameRules.penaltyOnFail ?? true) ? "تُخصم قيمة المزايدة عند الفشل" : "لا تُخصم نقاط عند الفشل"}
+                        </Text>
+                      </View>
+                      <View style={[styles.toggleSwitch, { backgroundColor: (gameRules.penaltyOnFail ?? true) ? colors.gold : colors.border }]}>
+                        <View style={[styles.toggleThumb, {
+                          backgroundColor: colors.background,
+                          alignSelf: (gameRules.penaltyOnFail ?? true) ? "flex-end" : "flex-start",
+                        }]} />
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Double bid */}
+                    <TouchableOpacity
+                      onPress={() => { setRule("doubleBid", !gameRules.doubleBid); Haptics.selectionAsync(); }}
+                      style={styles.ruleRow}
+                    >
+                      <View style={styles.ruleLeft}>
+                        <Text style={[styles.ruleLabel, { color: colors.text }]}>نقطة مضاعفة</Text>
+                        <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                          {gameRules.doubleBid ? "ضعف النقاط عند تحقيق المزايدة بالضبط ✓" : "لا تضاعف"}
+                        </Text>
+                      </View>
+                      <View style={[styles.toggleSwitch, { backgroundColor: gameRules.doubleBid ? colors.gold : colors.border }]}>
+                        <View style={[styles.toggleThumb, {
+                          backgroundColor: colors.background,
+                          alignSelf: gameRules.doubleBid ? "flex-end" : "flex-start",
+                        }]} />
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Max rounds — all games */}
+                <View style={[styles.rulesCard, { backgroundColor: colors.surface }]}>
+                  <View style={styles.ruleRow}>
+                    <View style={styles.ruleLeft}>
+                      <Text style={[styles.ruleLabel, { color: colors.text }]}>حد الجولات</Text>
+                      <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                        تنتهي اللعبة بعد عدد معين من الجولات
+                      </Text>
+                    </View>
+                    <View style={styles.ruleStepperRow}>
+                      {[0, 5, 10, 15, 20].map((v) => (
+                        <TouchableOpacity
+                          key={v}
+                          onPress={() => { setRule("maxRounds", v); Haptics.selectionAsync(); }}
+                          style={[
+                            styles.ruleStepBtn,
+                            {
+                              backgroundColor: (gameRules.maxRounds ?? 0) === v ? colors.gold : colors.surfaceRaised,
+                              borderColor: (gameRules.maxRounds ?? 0) === v ? colors.gold : colors.border,
+                            },
+                          ]}
+                        >
+                          <Text style={[styles.ruleStepBtnText, { color: (gameRules.maxRounds ?? 0) === v ? colors.background : colors.textMuted }]}>
+                            {v === 0 ? "∞" : v}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+              </View>
+            )}
+
             {/* Anti-cheat toggle */}
             <View style={[styles.toggleBlock, { backgroundColor: colors.surface }]}>
               <View style={styles.toggleRow}>
@@ -921,6 +1040,15 @@ const styles = StyleSheet.create({
   },
   chip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   chipText: { fontFamily: Fonts.body, fontSize: 13 },
+  // Game rules section
+  rulesCard: { borderRadius: 16, overflow: "hidden", marginTop: 8 },
+  ruleRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, gap: 10 },
+  ruleLeft: { flex: 1, gap: 3 },
+  ruleLabel: { fontFamily: Fonts.heading, fontSize: 15, textAlign: "right" },
+  ruleDesc: { fontFamily: Fonts.body, fontSize: 12, textAlign: "right" },
+  ruleStepperRow: { flexDirection: "row", gap: 5 },
+  ruleStepBtn: { width: 34, height: 34, borderRadius: 9, borderWidth: 1.5, alignItems: "center", justifyContent: "center" },
+  ruleStepBtnText: { fontFamily: Fonts.mono, fontSize: 13 },
   // Team assignment step
   teamCol: { flex: 1, borderRadius: 16, borderWidth: 1.5, overflow: "hidden" },
   teamColHeader: { paddingVertical: 10, paddingHorizontal: 12, alignItems: "center", gap: 2 },
