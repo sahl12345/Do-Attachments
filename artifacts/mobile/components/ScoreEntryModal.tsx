@@ -121,12 +121,14 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
   const teamB = [players[1], players[3]].filter(Boolean);
 
   const otherTricks = 13 - tricks;
-  const failScore = (rules?.penaltyOnFail ?? true) ? -bid : 0;
+  const failScore = bid === 13 ? -16 : (rules?.penaltyOnFail ?? true) ? -bid : 0;
   const successScore = (rules?.doubleBid && tricks === bid) ? bid * 2 : tricks;
+  const biddingSucceeds = !kabout && tricks >= bid;
   const biddingScore = kabout
     ? bid === 13 ? 26 : 16
-    : tricks >= bid ? successScore : failScore;
-  const otherScore = kabout ? 0 : otherTricks;
+    : biddingSucceeds ? successScore : failScore;
+  // other team gets their tricks only when bidding team fails; 0 on success/kabout
+  const otherScore = kabout || biddingSucceeds ? 0 : otherTricks;
   const aScore = biddingTeam === 0 ? biddingScore : otherScore;
   const bScore = biddingTeam === 1 ? biddingScore : otherScore;
 
@@ -435,9 +437,18 @@ function HandEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit
   const [noCards, setNoCards] = useState<Record<string, boolean>>(
     () => Object.fromEntries(players.map((p) => [p.id, false]))
   );
-  const [remaining, setRemaining] = useState<Record<string, number>>(
+  const [jokers, setJokers] = useState<Record<string, number>>(
     () => Object.fromEntries(players.map((p) => [p.id, 0]))
   );
+  const [aces, setAces] = useState<Record<string, number>>(
+    () => Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+  const [otherVal, setOtherVal] = useState<Record<string, number>>(
+    () => Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+
+  const getCardTotal = (id: string) =>
+    (jokers[id] ?? 0) * 15 + (aces[id] ?? 0) * 11 + (otherVal[id] ?? 0);
 
   const calcScores = (): Record<string, number> => {
     const mult = isHand ? 2 : 1;
@@ -446,11 +457,7 @@ function HandEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit
       if (p.id === winner) {
         s[p.id] = isHand ? -60 : -30;
       } else {
-        if (noCards[p.id]) {
-          s[p.id] = 100 * mult;
-        } else {
-          s[p.id] = (remaining[p.id] ?? 0) * mult;
-        }
+        s[p.id] = noCards[p.id] ? 100 * mult : getCardTotal(p.id) * mult;
       }
     });
     return s;
@@ -480,9 +487,7 @@ function HandEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit
             <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: winner === p.id ? colors.gold : colors.textDim }]}>
               {winner === p.id ? (isHand ? "-60" : "-30") : ""}
             </Text>
-            <Text style={[tkStyles.playerName, { color: winner === p.id ? colors.gold : colors.text }]}>
-              {p.name}
-            </Text>
+            <Text style={[tkStyles.playerName, { color: winner === p.id ? colors.gold : colors.text }]}>{p.name}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -498,48 +503,90 @@ function HandEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit
         </Text>
       </TouchableOpacity>
       {isHand && (
-        <Text style={[s.hint, { color: colors.textDim }]}>الفائز: -60  |  العقوبات تتضاعف</Text>
+        <Text style={[s.hint, { color: colors.textDim }]}>الفائز: -60  |  كل العقوبات تتضاعف ×٢</Text>
       )}
 
       <View style={[s.divider, { backgroundColor: colors.border }]} />
 
       {winner && (
         <>
-          <Text style={[s.label, { color: colors.textMuted }]}>الخاسرون — قيمة الأوراق المتبقية</Text>
-          {players.filter((p) => p.id !== winner).map((p) => (
-            <View key={p.id} style={handStyles.loserRow}>
-              <View style={{ flex: 1, gap: 6 }}>
-                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+          <Text style={[s.label, { color: colors.textMuted }]}>الخاسرون — أوراق بيدهم</Text>
+          {players.filter((p) => p.id !== winner).map((p) => {
+            const total = getCardTotal(p.id);
+            const finalScore = noCards[p.id] ? 100 * (isHand ? 2 : 1) : total * (isHand ? 2 : 1);
+            return (
+              <View key={p.id} style={[handStyles.loserCard, { backgroundColor: colors.surface, borderColor: noCards[p.id] ? colors.red : colors.border }]}>
+                {/* اسم اللاعب + نقطته النهائية */}
+                <View style={handStyles.loserHeader}>
+                  <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: colors.red }]}>+{finalScore}</Text>
+                  <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                </View>
+
+                {/* ما نزّل أوراق */}
                 <TouchableOpacity
                   onPress={() => { Haptics.selectionAsync(); setNoCards((prev) => ({ ...prev, [p.id]: !prev[p.id] })); }}
-                  style={[handStyles.noCardsBtn,
-                    noCards[p.id]
-                      ? { backgroundColor: `${colors.red}22`, borderColor: colors.red }
-                      : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
+                  style={[handStyles.noCardsBtn, noCards[p.id]
+                    ? { backgroundColor: `${colors.red}22`, borderColor: colors.red }
+                    : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
                 >
                   <Text style={[handStyles.noCardsText, { color: noCards[p.id] ? colors.red : colors.textDim }]}>
-                    ما لعب أوراقاً (+{100 * (isHand ? 2 : 1)})
+                    ⛔ ما نزّل أوراق (+{100 * (isHand ? 2 : 1)})
                   </Text>
                 </TouchableOpacity>
+
+                {!noCards[p.id] && (
+                  <View style={{ gap: 8, marginTop: 8 }}>
+                    {/* جوكر */}
+                    <View style={handStyles.cardRow}>
+                      <View style={{ alignItems: "center", gap: 2 }}>
+                        <Stepper value={jokers[p.id] ?? 0} onChange={(v) => setJokers((prev) => ({ ...prev, [p.id]: v }))} min={0} max={4} colors={colors} />
+                        {(jokers[p.id] ?? 0) > 0 && (
+                          <Text style={[handStyles.cardMult, { color: colors.red, fontFamily: Fonts.mono }]}>
+                            {`+${(jokers[p.id] ?? 0) * 15}`}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[handStyles.cardLabel, { color: colors.textMuted }]}>🃏 جوكر (×١٥)</Text>
+                    </View>
+
+                    {/* آص */}
+                    <View style={handStyles.cardRow}>
+                      <View style={{ alignItems: "center", gap: 2 }}>
+                        <Stepper value={aces[p.id] ?? 0} onChange={(v) => setAces((prev) => ({ ...prev, [p.id]: v }))} min={0} max={8} colors={colors} />
+                        {(aces[p.id] ?? 0) > 0 && (
+                          <Text style={[handStyles.cardMult, { color: colors.red, fontFamily: Fonts.mono }]}>
+                            {`+${(aces[p.id] ?? 0) * 11}`}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[handStyles.cardLabel, { color: colors.textMuted }]}>A آص (×١١)</Text>
+                    </View>
+
+                    {/* باقي الأوراق */}
+                    <View style={handStyles.cardRow}>
+                      <View style={{ alignItems: "center", gap: 2 }}>
+                        <Stepper value={otherVal[p.id] ?? 0} onChange={(v) => setOtherVal((prev) => ({ ...prev, [p.id]: v }))} min={0} max={200} colors={colors} />
+                        {(otherVal[p.id] ?? 0) > 0 && (
+                          <Text style={[handStyles.cardMult, { color: colors.red, fontFamily: Fonts.mono }]}>
+                            {`+${otherVal[p.id]}`}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={[handStyles.cardLabel, { color: colors.textMuted }]}>باقي الأوراق</Text>
+                    </View>
+
+                    {/* المجموع */}
+                    <View style={[handStyles.totalRow, { backgroundColor: `${colors.red}11` }]}>
+                      <Text style={[handStyles.cardMult, { color: colors.red, fontFamily: Fonts.mono, fontSize: 17 }]}>
+                        {isHand ? `${total} ×٢ = +${total * 2}` : `+${total}`}
+                      </Text>
+                      <Text style={[handStyles.cardLabel, { color: colors.textDim }]}>مجموع الأوراق</Text>
+                    </View>
+                  </View>
+                )}
               </View>
-              {!noCards[p.id] && (
-                <View style={{ alignItems: "center", gap: 4 }}>
-                  <Stepper
-                    value={remaining[p.id] ?? 0}
-                    onChange={(v) => setRemaining((prev) => ({ ...prev, [p.id]: v }))}
-                    min={0}
-                    max={150}
-                    colors={colors}
-                  />
-                  {isHand && (
-                    <Text style={[s.hint, { color: colors.textDim, marginTop: 2 }]}>
-                      ×٢ = {(remaining[p.id] ?? 0) * 2}
-                    </Text>
-                  )}
-                </View>
-              )}
-            </View>
-          ))}
+            );
+          })}
         </>
       )}
 
@@ -565,9 +612,14 @@ function HandEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit
 
 const handStyles = StyleSheet.create({
   winnerBtn: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", padding: 14, borderRadius: 14, borderWidth: 1.5 },
-  loserRow: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 10 },
-  noCardsBtn: { flexDirection: "row-reverse", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1 },
-  noCardsText: { fontFamily: Fonts.body, fontSize: 12 },
+  loserCard: { borderRadius: 14, borderWidth: 1.5, padding: 14, marginBottom: 12, gap: 8 },
+  loserHeader: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
+  noCardsBtn: { flexDirection: "row-reverse", alignItems: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1 },
+  noCardsText: { fontFamily: Fonts.body, fontSize: 13 },
+  cardRow: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
+  cardLabel: { fontFamily: Fonts.body, fontSize: 14 },
+  cardMult: { fontSize: 14 },
+  totalRow: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", padding: 10, borderRadius: 10 },
 });
 
 // ─── GENERIC ENTRY ────────────────────────────────────────────────────────────

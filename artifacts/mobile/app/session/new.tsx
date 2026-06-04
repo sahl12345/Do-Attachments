@@ -110,6 +110,11 @@ export default function NewSessionScreen() {
     // reset team assignment: first half → team A, second half → team B
     const half = Math.ceil(count / 2);
     setTeamAssignment(Array.from({ length: count }, (_, i) => (i < half ? 0 : 1)));
+    // apply game-specific rule defaults
+    const defaults: GameRules = {};
+    if (game.id === "hand" || game.id === "hand_sy") defaults.maxRounds = 5;
+    if (game.defaultRounds) defaults.maxRounds = game.defaultRounds;
+    setGameRules(defaults);
   };
 
   const addPlayer = () => {
@@ -617,53 +622,89 @@ export default function NewSessionScreen() {
                 نقاط الفوز
               </Text>
               <Text style={[styles.settingDesc, { color: colors.textMuted }]}>
-                أول لاعب يوصل هذا الرقم يفوز
+                {selectedGame?.lowerIsBetter
+                  ? "تنتهي اللعبة بعد ٥ جولات — الأقل نقاطاً يفوز"
+                  : "أول فريق/لاعب يوصل هذا الرقم يفوز"}
               </Text>
-              <View style={styles.targetRow}>
-                {[
-                  selectedGame?.defaultTarget ?? 41,
-                  (selectedGame?.defaultTarget ?? 41) + 10,
-                  (selectedGame?.defaultTarget ?? 41) + 20,
-                ].map((val) => (
-                  <TouchableOpacity
-                    key={val}
-                    onPress={() => {
-                      setTargetScore(val);
-                      Haptics.selectionAsync();
-                    }}
-                    style={[
-                      styles.targetBtn,
-                      {
-                        backgroundColor:
-                          targetScore === val ? colors.gold : colors.surface,
-                        borderColor:
-                          targetScore === val ? colors.gold : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
+              {!selectedGame?.lowerIsBetter && (
+                <View style={styles.targetRow}>
+                  {(
+                    (selectedGame?.id === "tarneeb" || selectedGame?.id === "tarneeb_sy")
+                      ? [31, 41, 61]
+                      : [
+                          selectedGame?.defaultTarget ?? 41,
+                          (selectedGame?.defaultTarget ?? 41) + 10,
+                          (selectedGame?.defaultTarget ?? 41) + 20,
+                        ]
+                  ).map((val) => (
+                    <TouchableOpacity
+                      key={val}
+                      onPress={() => {
+                        setTargetScore(val);
+                        Haptics.selectionAsync();
+                      }}
                       style={[
-                        styles.targetBtnText,
+                        styles.targetBtn,
                         {
-                          color:
-                            targetScore === val
-                              ? colors.background
-                              : colors.textMuted,
-                          fontFamily: Fonts.mono,
+                          backgroundColor:
+                            targetScore === val ? colors.gold : colors.surface,
+                          borderColor:
+                            targetScore === val ? colors.gold : colors.border,
                         },
                       ]}
                     >
-                      {val}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                      <Text
+                        style={[
+                          styles.targetBtnText,
+                          {
+                            color:
+                              targetScore === val
+                                ? colors.background
+                                : colors.textMuted,
+                            fontFamily: Fonts.mono,
+                          },
+                        ]}
+                      >
+                        {val}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
             </View>
 
             {/* ─── Game Rules ─────────────────────────────── */}
             {mode === "local" && selectedGame && (
               <View style={styles.settingBlock}>
                 <Text style={[styles.settingLabel, { color: colors.text }]}>⚙️ قواعد اللعبة</Text>
+
+                {/* Hand-specific rules */}
+                {(selectedGame.id === "hand" || selectedGame.id === "hand_sy") && (
+                  <View style={[styles.rulesCard, { backgroundColor: colors.surface }]}>
+                    {/* Info: 5 rounds fixed */}
+                    <View style={[styles.ruleRow, { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                      <View style={styles.ruleLeft}>
+                        <Text style={[styles.ruleLabel, { color: colors.text }]}>عدد الجولات</Text>
+                        <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                          {selectedGame.id === "hand" ? "الهاند ٥ جولات ثابتة — الأقل نقاطاً يفوز" : "الهاند السعودي ٥ جولات — أول نزال = ٥١+ نقطة"}
+                        </Text>
+                      </View>
+                      <Text style={[styles.ruleStepBtnText, { color: colors.gold, fontFamily: Fonts.mono, fontSize: 20 }]}>٥</Text>
+                    </View>
+
+                    {/* Joker/A values info */}
+                    <View style={styles.ruleRow}>
+                      <View style={styles.ruleLeft}>
+                        <Text style={[styles.ruleLabel, { color: colors.text }]}>قيمة الأوراق</Text>
+                        <Text style={[styles.ruleDesc, { color: colors.textDim }]}>
+                          {selectedGame.id === "hand_sy"
+                            ? "جوكر: ١٥  |  A: ١١  |  ما نزّل: +١٠٠  |  نزال أول: أعلى من المنزل الأخير +١"
+                            : "جوكر: ١٥  |  A: ١١  |  ما نزّل: +١٠٠  |  نزال أول: ٥١+ نقطة"}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                )}
 
                 {/* Tarneeb-specific rules */}
                 {(selectedGame.id === "tarneeb" || selectedGame.id === "tarneeb_sy") && (
