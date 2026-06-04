@@ -175,7 +175,7 @@ export default function GamesScreen() {
                 style={[styles.ctaBtn, { backgroundColor: colors.gold }]}
               >
                 <Text style={[styles.ctaBtnText, { color: colors.background }]}>
-                  العب هلق ⚡
+                  العب هلأ ⚡
                 </Text>
               </TouchableOpacity>
             </View>

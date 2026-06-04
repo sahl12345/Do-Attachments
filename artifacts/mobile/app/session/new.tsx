@@ -443,7 +443,7 @@ export default function NewSessionScreen() {
               </Text>
             </View>
             <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>
-              اسمك أنت (المضيف)
+              اسمك أنت (صاحب الجلسة)
             </Text>
             <TextInput
               style={[

@@ -95,7 +95,7 @@ function Actions({ onClose, onConfirm, colors, disabled = false }: { onClose: ()
         disabled={disabled}
         style={[actStyles.confirm, { backgroundColor: disabled ? colors.surfaceRaised : colors.gold }]}
       >
-        <Text style={[actStyles.confirmText, { color: disabled ? colors.textDim : colors.background }]}>تأكيد</Text>
+        <Text style={[actStyles.confirmText, { color: disabled ? colors.textDim : colors.background }]}>تمام</Text>
       </TouchableOpacity>
     </View>
   );
@@ -631,62 +631,82 @@ const genStyles = StyleSheet.create({
 });
 
 // ─── TERKIS COMPLEX ENTRY ─────────────────────────────────────────────────────
-const COMPLEX_CONTRACTS = [
-  { id: "ltosh",   label: "لطوش",      type: "count", unit: "لطشة",   penaltyPer: -15, max: 13 },
-  { id: "dinary",  label: "ديناري",    type: "count", unit: "ديناريه", penaltyPer: -10, max: 13 },
-  { id: "banat",   label: "بنات",      type: "count", unit: "بنت",    penaltyPer: -25, max: 4  },
-  { id: "sheikh",  label: "شيخ الكبة", type: "radio", unit: null,     penaltyPer: -75, max: 1  },
-  { id: "terkis",  label: "تركس",      type: "bonus", unit: null,     penaltyPer: 0,   max: 1  },
-  { id: "mamlaka", label: "مملكة",     type: "winner", unit: null,    penaltyPer: 0,   max: 1  },
-] as const;
-
-const COMPLEX_BONUS_VALUES = [200, 150, 100, 50];
+const TERKIS_FINISH_VALS = [200, 150, 100, 50];
 
 function TerkisComplexEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit: (s: Record<string, number>) => void; onClose: () => void }) {
   const colors = useColors();
   const [king, setKing] = useState<string | null>(null);
-  const [contract, setContract] = useState<string>("ltosh");
-  const [counts, setCounts] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
-  const [radioPlayer, setRadioPlayer] = useState<string | null>(null);
-  const [terkisPosition, setTerkisPosition] = useState(1);
+  const [roundType, setRoundType] = useState<"complex" | "terkis">("complex");
 
-  const def = COMPLEX_CONTRACTS.find((c) => c.id === contract)!;
+  // COMPLEX state
+  const [dinary, setDinary] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [banat, setBanat] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [ltosh, setLtosh] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [sheikOwner, setSheikOwner] = useState<string | null>(null);
+  const [hasTadveel, setHasTadveel] = useState(false);
+  const [tadveelCard, setTadveelCard] = useState<"sheik" | "bint" | null>(null);
+  const [tadveelRevealer, setTadveelRevealer] = useState<string | null>(null);
+  const [tadveelTaker, setTadveelTaker] = useState<string | null>(null);
 
-  const handleContractChange = (id: string) => {
+  // TERKIS state
+  const [terkisOrder, setTerkisOrder] = useState<string[]>([]);
+
+  const handleRoundTypeChange = (t: "complex" | "terkis") => {
     Haptics.selectionAsync();
-    setContract(id);
-    setCounts(Object.fromEntries(players.map((p) => [p.id, 0])));
-    setRadioPlayer(null);
+    setRoundType(t);
+    setDinary(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setBanat(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setLtosh(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setSheikOwner(null);
+    setHasTadveel(false);
+    setTadveelCard(null);
+    setTadveelRevealer(null);
+    setTadveelTaker(null);
+    setTerkisOrder([]);
   };
 
   const calcScores = (): Record<string, number> => {
     const s: Record<string, number> = {};
-    if (def.type === "count") {
-      players.forEach((p) => { s[p.id] = (counts[p.id] ?? 0) * def.penaltyPer; });
-    } else if (def.type === "radio") {
-      players.forEach((p) => { s[p.id] = p.id === radioPlayer ? def.penaltyPer : 0; });
-    } else if (def.type === "bonus") {
-      const bonus = COMPLEX_BONUS_VALUES[Math.min(terkisPosition - 1, COMPLEX_BONUS_VALUES.length - 1)];
-      players.forEach((p) => { s[p.id] = p.id === radioPlayer ? bonus : 0; });
-    } else if (def.type === "winner") {
-      // مملكة: winner gets 400pts, others get 0
-      players.forEach((p) => { s[p.id] = p.id === radioPlayer ? 400 : 0; });
+    players.forEach((p) => (s[p.id] = 0));
+    if (roundType === "complex") {
+      players.forEach((p) => {
+        s[p.id] += (dinary[p.id] ?? 0) * -10;
+        s[p.id] += (banat[p.id] ?? 0) * -25;
+        s[p.id] += (ltosh[p.id] ?? 0) * -15;
+        if (p.id === sheikOwner) s[p.id] -= 75;
+      });
+      if (hasTadveel && tadveelCard && tadveelRevealer && tadveelTaker) {
+        const originalVal = tadveelCard === "sheik" ? 75 : 25;
+        s[tadveelRevealer] = (s[tadveelRevealer] ?? 0) + originalVal;
+        s[tadveelTaker] = (s[tadveelTaker] ?? 0) - originalVal;
+      }
+    } else {
+      terkisOrder.forEach((pid, idx) => {
+        s[pid] = TERKIS_FINISH_VALS[idx] ?? 50;
+      });
     }
     return s;
   };
 
-  const isValid = def.type === "count" || !!radioPlayer;
   const scores = calcScores();
+  const isComplexValid = roundType !== "complex" || !hasTadveel || (!!tadveelCard && !!tadveelRevealer && !!tadveelTaker);
+  const isTerkisValid = roundType !== "terkis" || terkisOrder.length === players.length;
+  const isValid = isComplexValid && isTerkisValid;
 
   const confirm = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onSubmit(scores);
   };
 
+  const toggleTerkisFinisher = (pid: string) => {
+    Haptics.selectionAsync();
+    setTerkisOrder((prev) => prev.includes(pid) ? prev.filter((x) => x !== pid) : [...prev, pid]);
+  };
+
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      {/* King/Dealer selector */}
-      <Text style={[s.label, { color: colors.textMuted }]}>ملك هالدور</Text>
+      {/* المملكة الحالية */}
+      <Text style={[s.label, { color: colors.textMuted }]}>المملكة الحالية — صاحبها 👑</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
         <View style={{ flexDirection: "row-reverse", gap: 8, paddingHorizontal: 2 }}>
           {players.map((p) => (
@@ -695,155 +715,179 @@ function TerkisComplexEntry({ players, onSubmit, onClose }: { players: Player[];
               onPress={() => { Haptics.selectionAsync(); setKing(king === p.id ? null : p.id); }}
               style={[tkStyles.contractBtn,
                 king === p.id
-                  ? { backgroundColor: colors.success }
+                  ? { backgroundColor: colors.gold }
                   : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
             >
-              <Text style={[tkStyles.contractLabel, { color: king === p.id ? colors.background : colors.textMuted }]}>
-                {p.name}
-              </Text>
+              <Text style={[tkStyles.contractLabel, { color: king === p.id ? colors.background : colors.textMuted }]}>{p.name}</Text>
               {king === p.id && <Text style={[tkStyles.contractPts, { color: colors.background }]}>👑</Text>}
             </TouchableOpacity>
           ))}
         </View>
       </ScrollView>
 
-      <View style={[s.divider, { backgroundColor: colors.border }]} />
-
-      <Text style={[s.label, { color: colors.textMuted }]}>نوع العقد (اختار الملك)</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-        <View style={{ flexDirection: "row-reverse", gap: 8, paddingHorizontal: 2 }}>
-          {COMPLEX_CONTRACTS.map((c) => (
-            <TouchableOpacity
-              key={c.id}
-              onPress={() => handleContractChange(c.id)}
-              style={[tkStyles.contractBtn,
-                contract === c.id
-                  ? { backgroundColor: c.id === "mamlaka" ? colors.success : colors.gold }
-                  : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
-            >
-              <Text style={[tkStyles.contractLabel, { color: contract === c.id ? colors.background : colors.textMuted }]}>
-                {c.label}
-              </Text>
-              {c.type === "count" && (
-                <Text style={[tkStyles.contractPts, { color: contract === c.id ? colors.background : colors.textDim }]}>
-                  {c.penaltyPer}/{"unit" in c ? c.unit : ""}
-                </Text>
-              )}
-              {c.type === "radio" && (
-                <Text style={[tkStyles.contractPts, { color: contract === c.id ? colors.background : colors.textDim }]}>{c.penaltyPer}</Text>
-              )}
-              {c.type === "bonus" && (
-                <Text style={[tkStyles.contractPts, { color: contract === c.id ? colors.background : colors.textDim }]}>+{COMPLEX_BONUS_VALUES[0]}</Text>
-              )}
-              {c.type === "winner" && (
-                <Text style={[tkStyles.contractPts, { color: contract === c.id ? colors.background : colors.textDim }]}>+400</Text>
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </ScrollView>
+      {/* نوع الطلبة */}
+      <Text style={[s.label, { color: colors.textMuted }]}>الطلبة</Text>
+      <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 12 }}>
+        {(["complex", "terkis"] as const).map((t) => (
+          <TouchableOpacity
+            key={t}
+            onPress={() => handleRoundTypeChange(t)}
+            style={[s.teamBtn, { flex: 1 },
+              roundType === t
+                ? { backgroundColor: t === "complex" ? colors.red : colors.gold }
+                : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
+          >
+            <Text style={[s.teamBtnText, { color: roundType === t ? colors.background : colors.textMuted }]}>
+              {t === "complex" ? "كومبلكس" : "تركس"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       <View style={[s.divider, { backgroundColor: colors.border }]} />
 
-      {def.type === "count" && (
+      {roundType === "complex" && (
         <>
-          <Text style={[s.label, { color: colors.textMuted }]}>
-            كم {def.unit} أخذ كل لاعب؟ ({def.penaltyPer} للواحدة)
-          </Text>
+          {/* ديناري */}
+          <Text style={[s.label, { color: colors.textMuted }]}>♦ ديناري (-١٠ لكل)</Text>
           {players.map((p) => (
-            <View key={p.id} style={tkStyles.playerRow}>
-              <Stepper
-                value={counts[p.id] ?? 0}
-                onChange={(v) => setCounts((prev) => ({ ...prev, [p.id]: v }))}
-                min={0}
-                max={def.max}
-                colors={colors}
-              />
+            <View key={`d-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={dinary[p.id] ?? 0} onChange={(v) => setDinary((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
               <View style={tkStyles.playerInfo}>
                 <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
-                <Text style={[tkStyles.playerScore, { color: (counts[p.id] ?? 0) === 0 ? colors.textDim : colors.red, fontFamily: Fonts.mono }]}>
-                  {(counts[p.id] ?? 0) === 0 ? "٠" : `${(counts[p.id] ?? 0) * def.penaltyPer}`}
+                <Text style={[tkStyles.playerScore, { color: (dinary[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(dinary[p.id] ?? 0) > 0 ? `${(dinary[p.id] ?? 0) * -10}` : "٠"}
                 </Text>
               </View>
             </View>
           ))}
-        </>
-      )}
 
-      {(def.type === "radio" || def.type === "bonus" || def.type === "winner") && (
-        <>
-          <Text style={[s.label, { color: colors.textMuted }]}>
-            {def.id === "sheikh" ? "من أخذ شيخ الكبة؟" : def.id === "terkis" ? "من أخذ التركس؟" : "من فاز بالمملكة؟"}
-          </Text>
-          <View style={{ gap: 8 }}>
-            {players.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                onPress={() => { Haptics.selectionAsync(); setRadioPlayer(radioPlayer === p.id ? null : p.id); }}
-                style={[tkStyles.radioBtn,
-                  radioPlayer === p.id
-                    ? {
-                        backgroundColor: def.id === "mamlaka" ? `${colors.success}22` : def.id === "terkis" ? `${colors.gold}22` : `${colors.red}22`,
-                        borderColor: def.id === "mamlaka" ? colors.success : def.id === "terkis" ? colors.gold : colors.red,
-                      }
-                    : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
-              >
-                <Text style={[tkStyles.playerName, {
-                  color: radioPlayer === p.id
-                    ? def.id === "mamlaka" ? colors.success : def.id === "terkis" ? colors.gold : colors.red
-                    : colors.text
-                }]}>
-                  {p.name}
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* بنات */}
+          <Text style={[s.label, { color: colors.textMuted }]}>Q بنت (-٢٥ لكل)</Text>
+          {players.map((p) => (
+            <View key={`b-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={banat[p.id] ?? 0} onChange={(v) => setBanat((prev) => ({ ...prev, [p.id]: v }))} min={0} max={4} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                <Text style={[tkStyles.playerScore, { color: (banat[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(banat[p.id] ?? 0) > 0 ? `${(banat[p.id] ?? 0) * -25}` : "٠"}
                 </Text>
-                {radioPlayer === p.id && (
-                  <Text style={[tkStyles.playerScore, {
-                    fontFamily: Fonts.mono,
-                    color: def.id === "mamlaka" ? colors.success : def.id === "terkis" ? colors.gold : colors.red
-                  }]}>
-                    {def.id === "terkis"
-                      ? `+${COMPLEX_BONUS_VALUES[Math.min(terkisPosition - 1, COMPLEX_BONUS_VALUES.length - 1)]}`
-                      : def.id === "mamlaka" ? "+400"
-                      : `${def.penaltyPer}`}
-                  </Text>
-                )}
+              </View>
+            </View>
+          ))}
+
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* لطشات */}
+          <Text style={[s.label, { color: colors.textMuted }]}>لطشات (-١٥ لكل)</Text>
+          {players.map((p) => (
+            <View key={`l-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={ltosh[p.id] ?? 0} onChange={(v) => setLtosh((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                <Text style={[tkStyles.playerScore, { color: (ltosh[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(ltosh[p.id] ?? 0) > 0 ? `${(ltosh[p.id] ?? 0) * -15}` : "٠"}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* شيخ الكبة */}
+          <Text style={[s.label, { color: colors.textMuted }]}>K♠ شيخ الكبة (-٧٥) — من أخذه؟</Text>
+          <View style={{ gap: 8, marginBottom: 12 }}>
+            {players.map((p) => (
+              <TouchableOpacity key={`sk-${p.id}`}
+                onPress={() => { Haptics.selectionAsync(); setSheikOwner(sheikOwner === p.id ? null : p.id); }}
+                style={[tkStyles.radioBtn, sheikOwner === p.id ? { backgroundColor: `${colors.red}22`, borderColor: colors.red } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: sheikOwner === p.id ? colors.red : colors.textDim }]}>
+                  {sheikOwner === p.id ? "-75" : ""}
+                </Text>
+                <Text style={[tkStyles.playerName, { color: sheikOwner === p.id ? colors.red : colors.text }]}>{p.name}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity
-              onPress={() => { Haptics.selectionAsync(); setRadioPlayer(null); }}
-              style={[tkStyles.radioBtn,
-                !radioPlayer
-                  ? { backgroundColor: colors.surface, borderColor: colors.borderStrong }
-                  : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
-            >
-              <Text style={[tkStyles.playerName, { color: !radioPlayer ? colors.text : colors.textDim }]}>
-                ما أخذها أحد
-              </Text>
+            <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setSheikOwner(null); }}
+              style={[tkStyles.radioBtn, !sheikOwner ? { backgroundColor: colors.surface, borderColor: colors.borderStrong } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+              <Text style={[tkStyles.playerName, { color: !sheikOwner ? colors.text : colors.textDim }]}>ما أخذه أحد</Text>
             </TouchableOpacity>
           </View>
 
-          {def.id === "terkis" && radioPlayer && (
-            <>
-              <Text style={[s.label, { color: colors.textMuted, marginTop: 12 }]}>هذه المرة رقم؟</Text>
-              <View style={{ flexDirection: "row-reverse", gap: 8 }}>
-                {[1, 2, 3, 4].map((pos) => (
-                  <TouchableOpacity
-                    key={pos}
-                    onPress={() => { Haptics.selectionAsync(); setTerkisPosition(pos); }}
-                    style={[tkStyles.posBtn,
-                      terkisPosition === pos
-                        ? { backgroundColor: colors.gold }
-                        : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
-                  >
-                    <Text style={[tkStyles.posBtnText, { color: terkisPosition === pos ? colors.background : colors.textMuted }]}>
-                      {pos === 1 ? "١" : pos === 2 ? "٢" : pos === 3 ? "٣" : "٤+"}
-                    </Text>
-                    <Text style={[tkStyles.posBtnVal, { color: terkisPosition === pos ? colors.background : colors.textDim, fontFamily: Fonts.mono }]}>
-                      +{COMPLEX_BONUS_VALUES[Math.min(pos - 1, 3)]}
-                    </Text>
+          {/* التدبيل */}
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+          <TouchableOpacity
+            onPress={() => { Haptics.selectionAsync(); setHasTadveel(!hasTadveel); setTadveelCard(null); setTadveelRevealer(null); setTadveelTaker(null); }}
+            style={[tkStyles.radioBtn, hasTadveel ? { backgroundColor: `${colors.gold}22`, borderColor: colors.gold } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
+          >
+            <Text style={[tkStyles.playerName, { color: hasTadveel ? colors.gold : colors.text }]}>🃏 في تدبيل؟</Text>
+          </TouchableOpacity>
+
+          {hasTadveel && (
+            <View style={{ marginTop: 10, gap: 10 }}>
+              <Text style={[s.subHint, { color: colors.textDim }]}>الورقة المكشوفة</Text>
+              <View style={{ flexDirection: "row-reverse", gap: 10 }}>
+                {([{ id: "sheik" as const, label: "K♠ شيخ (+٧٥)" }, { id: "bint" as const, label: "Q بنت (+٢٥)" }]).map(({ id, label }) => (
+                  <TouchableOpacity key={id} onPress={() => { Haptics.selectionAsync(); setTadveelCard(id); }}
+                    style={[s.teamBtn, { flex: 1 }, tadveelCard === id ? { backgroundColor: colors.gold } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}>
+                    <Text style={[s.teamBtnText, { color: tadveelCard === id ? colors.background : colors.textMuted }]}>{label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
-            </>
+              <Text style={[s.subHint, { color: colors.textDim }]}>المدبّل (من كشف)</Text>
+              <View style={{ gap: 6 }}>
+                {players.map((p) => (
+                  <TouchableOpacity key={`tr-${p.id}`} onPress={() => { Haptics.selectionAsync(); setTadveelRevealer(p.id); }}
+                    style={[tkStyles.radioBtn, tadveelRevealer === p.id ? { backgroundColor: `${colors.gold}22`, borderColor: colors.gold } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                    <Text style={[tkStyles.playerName, { color: tadveelRevealer === p.id ? colors.gold : colors.text }]}>{p.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[s.subHint, { color: colors.textDim }]}>من أخذ الورقة المدبّلة</Text>
+              <View style={{ gap: 6 }}>
+                {players.map((p) => (
+                  <TouchableOpacity key={`tt-${p.id}`} onPress={() => { Haptics.selectionAsync(); setTadveelTaker(p.id); }}
+                    style={[tkStyles.radioBtn, tadveelTaker === p.id ? { backgroundColor: `${colors.red}22`, borderColor: colors.red } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                    <Text style={[tkStyles.playerName, { color: tadveelTaker === p.id ? colors.red : colors.text }]}>{p.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+        </>
+      )}
+
+      {roundType === "terkis" && (
+        <>
+          <Text style={[s.label, { color: colors.textMuted }]}>اضغط على اللاعبين بترتيب من خلّص أول</Text>
+          <Text style={[s.subHint, { color: colors.textDim, marginBottom: 10 }]}>١) +٢٠٠  ·  ٢) +١٥٠  ·  ٣) +١٠٠  ·  ٤) +٥٠</Text>
+          <View style={{ gap: 8, marginBottom: 12 }}>
+            {players.map((p) => {
+              const pos = terkisOrder.indexOf(p.id);
+              const isSel = pos !== -1;
+              return (
+                <TouchableOpacity key={p.id} onPress={() => toggleTerkisFinisher(p.id)}
+                  style={[tkStyles.radioBtn, isSel ? { backgroundColor: `${colors.gold}22`, borderColor: colors.gold } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                  <View style={{ flexDirection: "row-reverse", alignItems: "center", gap: 8 }}>
+                    {isSel && (
+                      <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.gold, alignItems: "center", justifyContent: "center" }}>
+                        <Text style={{ color: colors.background, fontFamily: Fonts.mono, fontSize: 11 }}>{pos + 1}</Text>
+                      </View>
+                    )}
+                    <Text style={[tkStyles.playerName, { color: isSel ? colors.gold : colors.text }]}>{p.name}</Text>
+                  </View>
+                  {isSel && (
+                    <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: colors.gold }]}>+{TERKIS_FINISH_VALS[pos]}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {terkisOrder.length < players.length && (
+            <Text style={[s.subHint, { color: colors.textDim, textAlign: "center", marginBottom: 8 }]}>
+              اضغط باقي اللاعبين بترتيب خلاصهم
+            </Text>
           )}
         </>
       )}
@@ -873,71 +917,197 @@ function BalootEntry({ players, onSubmit, onClose }: { players: Player[]; onSubm
   const colors = useColors();
   const teamA = [players[0], players[2]].filter(Boolean);
   const teamB = [players[1], players[3]].filter(Boolean);
-  const [teamAPoints, setTeamAPoints] = useState(76);
-  const [sanA, setSanA] = useState(0);
-  const [sanB, setSanB] = useState(0);
-  const [balootBonus, setBalootBonus] = useState<null | 0 | 1>(null);
+  const teamAName = teamA.map((p) => p.name).join(" / ");
+  const teamBName = teamB.map((p) => p.name).join(" / ");
 
-  const teamBPoints = Math.max(0, 152 - teamAPoints);
-  const totalA = teamAPoints + sanA * 50 + (balootBonus === 0 ? 162 : 0);
-  const totalB = teamBPoints + sanB * 50 + (balootBonus === 1 ? 162 : 0);
+  const [mode, setMode] = useState<"sun" | "hokm">("sun");
+  const [biddingTeam, setBiddingTeam] = useState<0 | 1>(0);
+  const [aRaw, setARaw] = useState(0);
+  const [bRaw, setBRaw] = useState(0);
+  const [lastTrick, setLastTrick] = useState<0 | 1 | null>(null);
+  const [allTricks, setAllTricks] = useState<0 | 1 | null>(null);
+  const [sraaA, setSraaA] = useState(0);
+  const [sraaB, setSraaB] = useState(0);
+  const [khamsinA, setKhamsinA] = useState(0);
+  const [khamsinB, setKhamsinB] = useState(0);
+  const [miaA, setMiaA] = useState(0);
+  const [miaB, setMiaB] = useState(0);
+  const [baloota, setBaloota] = useState<0 | 1 | null>(null);
+
+  const calcScores = () => {
+    const mult = mode === "sun" ? 2 : 1;
+    const adjA = aRaw + (lastTrick === 0 ? 10 : 0);
+    const adjB = bRaw + (lastTrick === 1 ? 10 : 0);
+    let cardA: number, cardB: number;
+
+    if (allTricks !== null) {
+      cardA = allTricks === 0 ? 44 : 0;
+      cardB = allTricks === 1 ? 44 : 0;
+    } else {
+      cardA = Math.round((adjA * mult) / 10) * 10;
+      cardB = Math.round((adjB * mult) / 10) * 10;
+      if (biddingTeam === 0 && cardA <= cardB) {
+        cardA = 0;
+        cardB = mode === "sun" ? 26 : 16;
+      } else if (biddingTeam === 1 && cardB <= cardA) {
+        cardB = 0;
+        cardA = mode === "sun" ? 26 : 16;
+      }
+    }
+
+    const projA = sraaA * 20 + khamsinA * 50 + miaA * 100 + (baloota === 0 ? 20 : 0);
+    const projB = sraaB * 20 + khamsinB * 50 + miaB * 100 + (baloota === 1 ? 20 : 0);
+    const failedBidder =
+      allTricks === null &&
+      ((biddingTeam === 0 && cardA === 0) || (biddingTeam === 1 && cardB === 0));
+    return { scoreA: cardA + projA, scoreB: cardB + projB, cardA, cardB, projA, projB, failedBidder };
+  };
+
+  const { scoreA, scoreB, cardA, cardB, projA, projB, failedBidder } = calcScores();
 
   const confirm = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const s: Record<string, number> = {};
-    teamA.forEach((p) => { s[p.id] = totalA; });
-    teamB.forEach((p) => { s[p.id] = totalB; });
+    teamA.forEach((p) => { s[p.id] = scoreA; });
+    teamB.forEach((p) => { s[p.id] = scoreB; });
     onSubmit(s);
   };
 
+  const ModeBtn = ({ m, label }: { m: "sun" | "hokm"; label: string }) => (
+    <TouchableOpacity
+      onPress={() => { Haptics.selectionAsync(); setMode(m); }}
+      style={[s.teamBtn, { flex: 1 },
+        mode === m
+          ? { backgroundColor: colors.gold }
+          : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
+    >
+      <Text style={[s.teamBtnText, { color: mode === m ? colors.background : colors.textMuted }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+
+  const TeamPickBtn = ({ idx, label, active, onTap, activeColor }: { idx: 0 | 1; label: string; active: boolean; onTap: () => void; activeColor: string }) => (
+    <TouchableOpacity
+      onPress={() => { Haptics.selectionAsync(); onTap(); }}
+      style={[s.teamBtn, { flex: 1 },
+        active
+          ? { backgroundColor: activeColor }
+          : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
+    >
+      <Text numberOfLines={1} style={[s.teamBtnText, { color: active ? colors.background : colors.textMuted }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <Text style={[s.label, { color: colors.textMuted }]}>نقاط الورق (فريق أ) — المجموع ١٥٢</Text>
-      <View style={s.centered}>
-        <Stepper value={teamAPoints} onChange={(v) => setTeamAPoints(Math.min(152, v))} min={0} max={152} colors={colors} />
-        <Text style={[s.subHint, { color: colors.textDim }]}>فريق ب تلقائي: {teamBPoints}</Text>
+      {/* نوع اللعب */}
+      <Text style={[s.label, { color: colors.textMuted }]}>نوع اللعب</Text>
+      <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 12 }}>
+        <ModeBtn m="sun" label="صن" />
+        <ModeBtn m="hokm" label="حكم" />
+      </View>
+
+      {/* الطالب */}
+      <Text style={[s.label, { color: colors.textMuted }]}>الطالب (من طلب اللعبة)</Text>
+      <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 12 }}>
+        <TeamPickBtn idx={0} label={teamAName} active={biddingTeam === 0} onTap={() => setBiddingTeam(0)} activeColor={colors.gold} />
+        <TeamPickBtn idx={1} label={teamBName} active={biddingTeam === 1} onTap={() => setBiddingTeam(1)} activeColor={colors.gold} />
       </View>
 
       <View style={[s.divider, { backgroundColor: colors.border }]} />
 
-      <Text style={[s.label, { color: colors.textMuted }]}>سن (sequences) — كل سن بـ٥٠ نقطة</Text>
-      <View style={{ flexDirection: "row-reverse", gap: 20, justifyContent: "center", marginBottom: 12 }}>
-        {[{ label: teamA.map((p) => p.name).join("/"), san: sanA, setSan: setSanA }, { label: teamB.map((p) => p.name).join("/"), san: sanB, setSan: setSanB }].map(({ label, san, setSan }, i) => (
-          <View key={i} style={{ alignItems: "center", gap: 6 }}>
-            <Text style={[s.label, { color: colors.textMuted, marginBottom: 0 }]} numberOfLines={1}>{label}</Text>
-            <Stepper value={san} onChange={setSan} min={0} max={4} colors={colors} />
-          </View>
-        ))}
-      </View>
-
-      <Text style={[s.label, { color: colors.textMuted }]}>بلوت؟ (أكشح ١٥٢ + ١٦٢ مكافأة)</Text>
+      {/* أخذ الكل */}
+      <Text style={[s.label, { color: colors.textMuted }]}>أخذ كل الأكلات؟ (+٤٤)</Text>
       <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 12 }}>
-        {[{ label: teamA.map((p) => p.name).join("/"), idx: 0 }, { label: teamB.map((p) => p.name).join("/"), idx: 1 }].map(({ label, idx }) => (
-          <TouchableOpacity
-            key={idx}
-            onPress={() => { Haptics.selectionAsync(); setBalootBonus(balootBonus === idx ? null : idx as 0 | 1); }}
-            style={[s.teamBtn, { flex: 1 }, balootBonus === idx
-              ? { backgroundColor: colors.gold }
-              : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
-          >
-            <Text numberOfLines={1} style={[s.teamBtnText, { color: balootBonus === idx ? colors.background : colors.textMuted }]}>{label}</Text>
-          </TouchableOpacity>
-        ))}
+        <TeamPickBtn idx={0} label={teamAName} active={allTricks === 0} onTap={() => setAllTricks(allTricks === 0 ? null : 0)} activeColor={colors.success} />
+        <TeamPickBtn idx={1} label={teamBName} active={allTricks === 1} onTap={() => setAllTricks(allTricks === 1 ? null : 1)} activeColor={colors.success} />
         <TouchableOpacity
-          onPress={() => { Haptics.selectionAsync(); setBalootBonus(null); }}
-          style={[s.teamBtn, { paddingHorizontal: 12 }, balootBonus === null
-            ? { backgroundColor: colors.surfaceRaised, borderColor: colors.borderStrong, borderWidth: 1.5 }
-            : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
+          onPress={() => { Haptics.selectionAsync(); setAllTricks(null); }}
+          style={[s.teamBtn, { paddingHorizontal: 12 },
+            allTricks === null
+              ? { backgroundColor: colors.surface, borderColor: colors.borderStrong, borderWidth: 1.5 }
+              : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
         >
           <Text style={[s.teamBtnText, { color: colors.textMuted }]}>لا</Text>
         </TouchableOpacity>
       </View>
 
+      {allTricks === null && (
+        <>
+          {/* أبناط */}
+          <Text style={[s.label, { color: colors.textMuted }]}>أبناط كل فريق (مجموع قيمة أوراقه)</Text>
+          {[{ label: teamAName, val: aRaw, set: setARaw }, { label: teamBName, val: bRaw, set: setBRaw }].map(({ label, val, set }, i) => (
+            <View key={i} style={tkStyles.playerRow}>
+              <Stepper value={val} onChange={set} min={0} max={300} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]} numberOfLines={1}>{label}</Text>
+                <Text style={[tkStyles.playerScore, { color: colors.textDim, fontFamily: Fonts.mono }]}>
+                  ≈ {Math.round((val * (mode === "sun" ? 2 : 1)) / 10) * 10} نقطة
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          {/* آخر أكلة */}
+          <Text style={[s.label, { color: colors.textMuted, marginTop: 8 }]}>آخر أكلة (+١٠ أبناط)</Text>
+          <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 12 }}>
+            <TeamPickBtn idx={0} label={teamAName} active={lastTrick === 0} onTap={() => setLastTrick(lastTrick === 0 ? null : 0)} activeColor={`${colors.gold}`} />
+            <TeamPickBtn idx={1} label={teamBName} active={lastTrick === 1} onTap={() => setLastTrick(lastTrick === 1 ? null : 1)} activeColor={`${colors.gold}`} />
+          </View>
+        </>
+      )}
+
+      <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+      {/* المشاريع */}
+      <Text style={[s.label, { color: colors.textMuted }]}>المشاريع</Text>
+      {[
+        { key: "sraa", label: "سرا (+٢٠ لكل)", aVal: sraaA, bVal: sraaB, setA: setSraaA, setB: setSraaB, max: 5 },
+        { key: "khamsin", label: "خمسين (+٥٠ لكل)", aVal: khamsinA, bVal: khamsinB, setA: setKhamsinA, setB: setKhamsinB, max: 3 },
+        { key: "mia", label: "مئة (+١٠٠ لكل)", aVal: miaA, bVal: miaB, setA: setMiaA, setB: setMiaB, max: 2 },
+      ].map(({ key, label, aVal, bVal, setA, setB, max }) => (
+        <View key={key} style={{ marginBottom: 12 }}>
+          <Text style={[s.subHint, { color: colors.textDim, marginBottom: 6 }]}>{label}</Text>
+          <View style={{ flexDirection: "row-reverse", gap: 20, justifyContent: "space-around" }}>
+            {[{ lbl: teamAName, v: aVal, fn: setA }, { lbl: teamBName, v: bVal, fn: setB }].map(({ lbl, v, fn }, i) => (
+              <View key={i} style={{ alignItems: "center", gap: 4 }}>
+                <Text style={[s.subHint, { color: colors.textMuted }]} numberOfLines={1}>{lbl}</Text>
+                <Stepper value={v} onChange={fn} min={0} max={max} colors={colors} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ))}
+
+      {/* بلوت */}
+      <Text style={[s.subHint, { color: colors.textDim, marginBottom: 6 }]}>بلوت (+٢٠) — شيخ وبنت الحكم عند نفس اللاعب</Text>
+      <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 16 }}>
+        <TeamPickBtn idx={0} label={teamAName} active={baloota === 0} onTap={() => setBaloota(baloota === 0 ? null : 0)} activeColor={`${colors.gold}`} />
+        <TeamPickBtn idx={1} label={teamBName} active={baloota === 1} onTap={() => setBaloota(baloota === 1 ? null : 1)} activeColor={`${colors.gold}`} />
+        <TouchableOpacity
+          onPress={() => { Haptics.selectionAsync(); setBaloota(null); }}
+          style={[s.teamBtn, { paddingHorizontal: 12 },
+            baloota === null
+              ? { backgroundColor: colors.surface, borderColor: colors.borderStrong, borderWidth: 1.5 }
+              : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
+        >
+          <Text style={[s.teamBtnText, { color: colors.textMuted }]}>لا</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* النتيجة */}
       <View style={[s.preview, { backgroundColor: colors.surface }]}>
         <Text style={[s.previewTitle, { color: colors.textMuted }]}>النتيجة</Text>
-        {[{ name: teamA.map((p) => p.name).join(" / "), score: totalA }, { name: teamB.map((p) => p.name).join(" / "), score: totalB }].map(({ name, score }, i) => (
+        {failedBidder && (
+          <Text style={[s.subHint, { color: colors.red, marginBottom: 6, textAlign: "center" }]}>
+            ⚠️ الطالب ما وصل — {mode === "sun" ? "الخصم +٢٦ (صن)" : "الخصم +١٦ (حكم)"}
+          </Text>
+        )}
+        {[{ name: teamAName, score: scoreA, card: cardA, proj: projA }, { name: teamBName, score: scoreB, card: cardB, proj: projB }].map(({ name, score, card, proj }, i) => (
           <View key={i} style={s.previewRow}>
-            <Text style={[s.previewScore, { color: score >= 76 ? colors.success : colors.red, fontFamily: Fonts.mono }]}>+{score}</Text>
+            <View style={{ alignItems: "flex-end" }}>
+              <Text style={[s.previewScore, { color: colors.gold, fontFamily: Fonts.mono }]}>+{score}</Text>
+              {proj > 0 && <Text style={[s.subHint, { color: colors.textDim }]}>ورق: {card} + مشاريع: {proj}</Text>}
+            </View>
             <Text style={[s.previewName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
           </View>
         ))}
@@ -1039,16 +1209,16 @@ function BasraEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmi
 // ─── LEEKHA ENTRY ─────────────────────────────────────────────────────────────
 function LeekhaEntry({ players, onSubmit, onClose }: { players: Player[]; onSubmit: (s: Record<string, number>) => void; onClose: () => void }) {
   const colors = useColors();
-  const [hearts, setHearts] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [spades, setSpades] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
   const [hasQueenSpade, setHasQueenSpade] = useState<string | null>(null);
-  const [hasJackDiamond, setHasJackDiamond] = useState<string | null>(null);
+  const [hasDiamondTen, setHasDiamondTen] = useState<string | null>(null);
 
   const calcScores = (): Record<string, number> => {
     const s: Record<string, number> = {};
     players.forEach((p) => {
-      let pts = -(hearts[p.id] ?? 0);
-      if (p.id === hasQueenSpade) pts -= 13;
-      if (p.id === hasJackDiamond) pts += 10;
+      let pts = spades[p.id] ?? 0;
+      if (p.id === hasQueenSpade) pts += 13;
+      if (p.id === hasDiamondTen) pts += 10;
       s[p.id] = pts;
     });
     return s;
@@ -1063,14 +1233,14 @@ function LeekhaEntry({ players, onSubmit, onClose }: { players: Player[]; onSubm
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <Text style={[s.label, { color: colors.textMuted }]}>♥ قلوب لكل لاعب (-١ لكل واحدة)</Text>
+      <Text style={[s.label, { color: colors.textMuted }]}>♠ كبة — كم ورقة بستوني أخذ كل لاعب؟ (+١ لكل)</Text>
       {players.map((p) => (
         <View key={p.id} style={tkStyles.playerRow}>
-          <Stepper value={hearts[p.id] ?? 0} onChange={(v) => setHearts((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+          <Stepper value={spades[p.id] ?? 0} onChange={(v) => setSpades((prev) => ({ ...prev, [p.id]: v }))} min={0} max={12} colors={colors} />
           <View style={tkStyles.playerInfo}>
             <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
-            <Text style={[tkStyles.playerScore, { color: hearts[p.id] ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
-              {hearts[p.id] ? `${-(hearts[p.id] ?? 0)}` : "٠"}
+            <Text style={[tkStyles.playerScore, { color: (spades[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+              {(spades[p.id] ?? 0) > 0 ? `+${spades[p.id]}` : "٠"}
             </Text>
           </View>
         </View>
@@ -1078,13 +1248,13 @@ function LeekhaEntry({ players, onSubmit, onClose }: { players: Player[]; onSubm
 
       <View style={[s.divider, { backgroundColor: colors.border }]} />
 
-      <Text style={[s.label, { color: colors.textMuted }]}>♠ بنت سبايا (-١٣) — من أخذتها؟</Text>
+      <Text style={[s.label, { color: colors.textMuted }]}>Q♠ بنت البستوني (+١٣) — من أخذتها؟</Text>
       <View style={{ gap: 8, marginBottom: 12 }}>
         {players.map((p) => (
           <TouchableOpacity key={p.id} onPress={() => { Haptics.selectionAsync(); setHasQueenSpade(hasQueenSpade === p.id ? null : p.id); }}
             style={[tkStyles.radioBtn, hasQueenSpade === p.id ? { backgroundColor: `${colors.red}22`, borderColor: colors.red } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
             <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: hasQueenSpade === p.id ? colors.red : colors.textDim }]}>
-              {hasQueenSpade === p.id ? "-13" : ""}
+              {hasQueenSpade === p.id ? "+13" : ""}
             </Text>
             <Text style={[tkStyles.playerName, { color: hasQueenSpade === p.id ? colors.red : colors.text }]}>{p.name}</Text>
           </TouchableOpacity>
@@ -1095,29 +1265,29 @@ function LeekhaEntry({ players, onSubmit, onClose }: { players: Player[]; onSubm
         </TouchableOpacity>
       </View>
 
-      <Text style={[s.label, { color: colors.textMuted }]}>♦ داما (+١٠) — من أخذها؟</Text>
+      <Text style={[s.label, { color: colors.textMuted }]}>10♦ عشرة الديناري (+١٠) — من أخذها؟</Text>
       <View style={{ gap: 8, marginBottom: 12 }}>
         {players.map((p) => (
-          <TouchableOpacity key={p.id} onPress={() => { Haptics.selectionAsync(); setHasJackDiamond(hasJackDiamond === p.id ? null : p.id); }}
-            style={[tkStyles.radioBtn, hasJackDiamond === p.id ? { backgroundColor: `${colors.gold}22`, borderColor: colors.gold } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
-            <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: hasJackDiamond === p.id ? colors.gold : colors.textDim }]}>
-              {hasJackDiamond === p.id ? "+10" : ""}
+          <TouchableOpacity key={p.id} onPress={() => { Haptics.selectionAsync(); setHasDiamondTen(hasDiamondTen === p.id ? null : p.id); }}
+            style={[tkStyles.radioBtn, hasDiamondTen === p.id ? { backgroundColor: `${colors.red}22`, borderColor: colors.red } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+            <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: hasDiamondTen === p.id ? colors.red : colors.textDim }]}>
+              {hasDiamondTen === p.id ? "+10" : ""}
             </Text>
-            <Text style={[tkStyles.playerName, { color: hasJackDiamond === p.id ? colors.gold : colors.text }]}>{p.name}</Text>
+            <Text style={[tkStyles.playerName, { color: hasDiamondTen === p.id ? colors.red : colors.text }]}>{p.name}</Text>
           </TouchableOpacity>
         ))}
-        <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setHasJackDiamond(null); }}
-          style={[tkStyles.radioBtn, !hasJackDiamond ? { backgroundColor: colors.surface, borderColor: colors.borderStrong } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
-          <Text style={[tkStyles.playerName, { color: !hasJackDiamond ? colors.text : colors.textDim }]}>ما أخذها أحد</Text>
+        <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setHasDiamondTen(null); }}
+          style={[tkStyles.radioBtn, !hasDiamondTen ? { backgroundColor: colors.surface, borderColor: colors.borderStrong } : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+          <Text style={[tkStyles.playerName, { color: !hasDiamondTen ? colors.text : colors.textDim }]}>ما أخذها أحد</Text>
         </TouchableOpacity>
       </View>
 
       <View style={[s.preview, { backgroundColor: colors.surface }]}>
-        <Text style={[s.previewTitle, { color: colors.textMuted }]}>النتيجة</Text>
+        <Text style={[s.previewTitle, { color: colors.textMuted }]}>النتيجة (أقل = أحسن)</Text>
         {players.map((p) => (
           <View key={p.id} style={s.previewRow}>
-            <Text style={[s.previewScore, { color: (scores[p.id] ?? 0) < 0 ? colors.red : (scores[p.id] ?? 0) > 0 ? colors.success : colors.textDim, fontFamily: Fonts.mono }]}>
-              {(scores[p.id] ?? 0) > 0 ? `+${scores[p.id]}` : `${scores[p.id] ?? 0}`}
+            <Text style={[s.previewScore, { color: (scores[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+              +{scores[p.id] ?? 0}
             </Text>
             <Text style={[s.previewName, { color: colors.text }]} numberOfLines={1}>{p.name}</Text>
           </View>
@@ -1219,6 +1389,13 @@ function JackarooEntry({ players, isComplex, onSubmit, onClose }: { players: Pla
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      {/* ورقة غش جاكارو */}
+      <View style={[s.preview, { backgroundColor: `${colors.gold}11`, borderColor: `${colors.gold}44`, borderWidth: 1, marginBottom: 12 }]}>
+        <Text style={[s.previewTitle, { color: colors.gold }]}>📋 قواعد تذكيرية</Text>
+        <Text style={[s.subHint, { color: colors.textDim, lineHeight: 20 }]}>
+          {"• حجرك على حجر خصم → الخصم يرجع للبيت\n• حجرين متتابعين = قاعدة (محمية من القتل والتخطي)\n• للدخول لمنطقة الأمان: القيمة لازم تكفي بالضبط\n• ما تقدر تتخطى نفسك"}
+        </Text>
+      </View>
       <Text style={[s.label, { color: colors.textMuted }]}>من وصّل قطعه للبيت أولاً؟</Text>
       <View style={s.teamRow}>
         {[{ team: teamA, idx: 0 }, { team: teamB, idx: 1 }].map(({ team, idx }) => (

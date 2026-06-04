@@ -498,7 +498,7 @@ export default function SessionScreen() {
             >
               <Feather name="loader" size={28} color={colors.gold} />
               <Text style={[styles.waitingText, { color: colors.text }]}>
-                انتظر ريثما يبدأ المضيف...
+                انتظر لحظة على صاحب الجلسة يبدأ…
               </Text>
               {myPlayer && (
                 <Text style={[styles.waitingName, { color: colors.textMuted }]}>
@@ -510,7 +510,7 @@ export default function SessionScreen() {
 
           <View style={[styles.playersBox, { backgroundColor: colors.surface }]}>
             <Text style={[styles.playersBoxTitle, { color: colors.textMuted }]}>
-              اللاعبون ({players.length})
+              اللاعبين ({players.length})
             </Text>
             {players.length === 0 ? (
               <Text style={[styles.noPlayersText, { color: colors.textDim }]}>
@@ -698,7 +698,7 @@ export default function SessionScreen() {
         >
           <Feather name="wifi" size={14} color={colors.gold} />
           <Text style={[styles.watcherText, { color: colors.gold }]}>
-            {isHost ? "أنت المضيف 👑" : "أي لاعب يقدر يسجّل الجولة"}
+            {isHost ? "أنت صاحب الجلسة 👑" : "أي لاعب يقدر يسجّل الجولة"}
           </Text>
         </View>
       )}
@@ -894,7 +894,7 @@ export default function SessionScreen() {
                 <Text style={styles.acEmoji}>👀</Text>
                 <Text style={[styles.acTitle, { color: colors.text }]}>هالجولة صح؟</Text>
                 <Text style={[styles.acMsg, { color: colors.textMuted }]}>
-                  تأكيد من الأغلبية ({acMajority} من {sessionPlayers.length})
+                  موافقة الأغلبية ({acMajority} من {sessionPlayers.length})
                 </Text>
 
                 {/* Score preview */}
@@ -919,7 +919,7 @@ export default function SessionScreen() {
                 <View style={[styles.acVoteTally, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.acVoteCount}>
                     <Text style={[styles.acVoteNum, { color: colors.success }]}>{acApprovals}</Text>
-                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ موافقة</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ صح</Text>
                   </View>
                   <View style={[styles.acVoteDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.acVoteCount}>
@@ -936,7 +936,7 @@ export default function SessionScreen() {
                   }]}>
                     {antiCheatCountdown}
                   </Text>
-                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تأكيد تلقائي</Text>
+                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تمام تلقائياً</Text>
                 </View>
 
                 {/* Buttons */}
@@ -984,7 +984,7 @@ export default function SessionScreen() {
                 <Text style={styles.acEmoji}>👀</Text>
                 <Text style={[styles.acTitle, { color: colors.text }]}>هالجولة صح؟</Text>
                 <Text style={[styles.acMsg, { color: colors.textMuted }]}>
-                  سجّلها {recorderName} · تأكيد من الأغلبية ({onlineMajority} من {sessionPlayers.length})
+                  سجّلها {recorderName} · موافقة الأغلبية ({onlineMajority} من {sessionPlayers.length})
                 </Text>
 
                 {/* Score preview */}
@@ -1009,7 +1009,7 @@ export default function SessionScreen() {
                 <View style={[styles.acVoteTally, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <View style={styles.acVoteCount}>
                     <Text style={[styles.acVoteNum, { color: colors.success }]}>{onlineAcApprovals}</Text>
-                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ موافقة</Text>
+                    <Text style={[styles.acVoteLabel, { color: colors.textDim }]}>✅ صح</Text>
                   </View>
                   <View style={[styles.acVoteDivider, { backgroundColor: colors.border }]} />
                   <View style={styles.acVoteCount}>
@@ -1026,7 +1026,7 @@ export default function SessionScreen() {
                   }]}>
                     {onlineAcCountdown}
                   </Text>
-                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تأكيد تلقائي</Text>
+                  <Text style={[styles.acCountdownLabel, { color: colors.textDim }]}>تمام تلقائياً</Text>
                 </View>
 
                 {onlineHasVoted ? (
