@@ -1590,6 +1590,378 @@ const s = StyleSheet.create({
   previewScore: { fontSize: 20 },
 });
 
+// ─── ESTIMATION (إستميشن) ─────────────────────────────────────────────────────
+function EstimationEntry({ players, roundNumber, onSubmit, onClose }: {
+  players: Player[]; roundNumber: number;
+  onSubmit: (s: Record<string, number>) => void; onClose: () => void;
+}) {
+  const colors = useColors();
+  const [step, setStep] = useState<"bid" | "actual">("bid");
+  const [bids, setBids] = useState<Record<string, number>>(() =>
+    Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+  const [actuals, setActuals] = useState<Record<string, number>>(() =>
+    Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+
+  const totalBid = players.reduce((s, p) => s + bids[p.id], 0);
+  const bidIsThirteen = totalBid === 13;
+  const totalActual = players.reduce((s, p) => s + actuals[p.id], 0);
+  const roundType = roundNumber <= 13 ? "جولة عادية" : "كولور 🎨";
+
+  const calcScores = (): Record<string, number> => {
+    const successCount = players.filter((p) => bids[p.id] === actuals[p.id]).length;
+    const scores: Record<string, number> = {};
+    for (const p of players) {
+      const bid = bids[p.id];
+      const actual = actuals[p.id];
+      const success = bid === actual;
+      const isDash = bid === 0;
+      const isAlone = success && successCount === 1;
+      if (success) {
+        let score = 10 + actual;
+        if (isAlone) score += 10;
+        if (isDash) score += 33;
+        scores[p.id] = score;
+      } else {
+        const diff = Math.abs(bid - actual);
+        let penalty = diff;
+        if (isDash && actual > 0) penalty += 25;
+        scores[p.id] = -penalty;
+      }
+    }
+    return scores;
+  };
+
+  return (
+    <ScrollView showsVerticalScrollIndicator={false}>
+      <View style={[estStyles.badge, { backgroundColor: `${colors.gold}22` }]}>
+        <Text style={[estStyles.badgeText, { color: colors.gold }]}>
+          جولة {roundNumber} من ١٨ — {roundType}
+        </Text>
+      </View>
+
+      {step === "bid" ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة تطلب؟</Text>
+          {players.map((p) => (
+            <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
+              <Stepper value={bids[p.id]} onChange={(v) => setBids((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+              <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+            </View>
+          ))}
+          <View style={[estStyles.sumRow, { backgroundColor: bidIsThirteen ? `${colors.red}22` : `${colors.success}11` }]}>
+            <Text style={[estStyles.sumText, { color: bidIsThirteen ? colors.red : colors.textMuted }]}>
+              {bidIsThirteen ? "⚠️ المجموع = ١٣! عدّل طلب واحد" : `المجموع: ${totalBid}`}
+            </Text>
+          </View>
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={onClose} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>إلغاء</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setStep("actual")}
+              disabled={bidIsThirteen}
+              style={[estStyles.submitBtn, { backgroundColor: bidIsThirteen ? colors.surfaceRaised : colors.gold }]}
+            >
+              <Text style={[estStyles.submitBtnText, { color: bidIsThirteen ? colors.textDim : colors.background }]}>التالي ▶</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة أخذ كل لاعب؟</Text>
+          {players.map((p) => {
+            const success = actuals[p.id] === bids[p.id];
+            return (
+              <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
+                <Stepper value={actuals[p.id]} onChange={(v) => setActuals((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+                <View style={estStyles.playerInfo}>
+                  <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                  <Text style={[estStyles.bidLabel, { color: success ? colors.success : colors.textDim }]}>
+                    طلب: {bids[p.id]} {success ? "✅" : "❌"}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+          <View style={[estStyles.sumRow, { backgroundColor: `${colors.gold}11` }]}>
+            <Text style={[estStyles.sumText, { color: colors.gold }]}>مجموع اللطشات: {totalActual} / ١٣</Text>
+          </View>
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={() => setStep("bid")} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onSubmit(calcScores())} style={[estStyles.submitBtn, { backgroundColor: colors.gold }]}>
+              <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل الجولة</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+const estStyles = StyleSheet.create({
+  badge: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 10, alignSelf: "center", marginBottom: 12 },
+  badgeText: { fontFamily: "Cairo_700Bold", fontSize: 13 },
+  stepLabel: { fontFamily: "Tajawal_400Regular", fontSize: 14, textAlign: "center", marginBottom: 10 },
+  playerRow: { flexDirection: "row-reverse", alignItems: "center", borderRadius: 12, padding: 12, marginBottom: 8, gap: 12 },
+  playerName: { fontFamily: "Cairo_700Bold", fontSize: 15, flex: 1, textAlign: "right" },
+  playerInfo: { flex: 1, alignItems: "flex-end", gap: 2 },
+  bidLabel: { fontFamily: "Tajawal_400Regular", fontSize: 12 },
+  sumRow: { borderRadius: 10, padding: 10, marginVertical: 6, alignItems: "center" },
+  sumText: { fontFamily: "Cairo_700Bold", fontSize: 14, textAlign: "center" },
+  btnRow: { flexDirection: "row-reverse", gap: 10, marginTop: 16 },
+  backBtn: { paddingHorizontal: 20, paddingVertical: 13, borderRadius: 14, borderWidth: 1 },
+  backBtnText: { fontFamily: "Cairo_700Bold", fontSize: 14 },
+  submitBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: "center" },
+  submitBtnText: { fontFamily: "Cairo_700Bold", fontSize: 16 },
+});
+
+// ─── KSARA (كسرة) ─────────────────────────────────────────────────────────────
+type KsaraSubGame = "complex" | "tarneeb" | "ltashin" | "terkis";
+const KSARA_SUBGAMES: { id: KsaraSubGame; label: string; emoji: string }[] = [
+  { id: "complex", label: "كومبلكس", emoji: "🃏" },
+  { id: "tarneeb", label: "طرنيب", emoji: "♠️" },
+  { id: "ltashin", label: "لطشين", emoji: "⚡" },
+  { id: "terkis", label: "تركس", emoji: "🏆" },
+];
+const KSARA_TERKIS_VALS = [200, 150, 100, 50];
+
+function KsaraEntry({ players, onSubmit, onClose }: {
+  players: Player[];
+  onSubmit: (s: Record<string, number>) => void; onClose: () => void;
+}) {
+  const colors = useColors();
+  const [subGame, setSubGame] = useState<KsaraSubGame | null>(null);
+  const [kingdomIdx, setKingdomIdx] = useState(0);
+  const [tricks, setTricks] = useState<Record<string, number>>(() =>
+    Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+  const [complexScores, setComplexScores] = useState<Record<string, number>>(() =>
+    Object.fromEntries(players.map((p) => [p.id, 0]))
+  );
+  const [ltash12, setLtash12] = useState<string | null>(null);
+  const [ltash13, setLtash13] = useState<string | null>(null);
+  const [finishOrder, setFinishOrder] = useState<string[]>([]);
+
+  const toggleFinish = (id: string) => {
+    setFinishOrder((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const handleSubmit = () => {
+    if (!subGame) return;
+    let scores: Record<string, number> = {};
+    if (subGame === "terkis") {
+      players.forEach((p) => { scores[p.id] = 0; });
+      finishOrder.forEach((id, i) => { scores[id] = KSARA_TERKIS_VALS[i] ?? 50; });
+    } else if (subGame === "tarneeb") {
+      players.forEach((p) => { scores[p.id] = tricks[p.id] * 10; });
+    } else if (subGame === "ltashin") {
+      players.forEach((p) => { scores[p.id] = 0; });
+      if (ltash12) scores[ltash12] = (scores[ltash12] ?? 0) - 60;
+      if (ltash13) scores[ltash13] = (scores[ltash13] ?? 0) - 70;
+    } else {
+      scores = { ...complexScores };
+    }
+    onSubmit(scores);
+  };
+
+  const kingdomOwner = players[kingdomIdx % players.length];
+
+  return (
+    <ScrollView showsVerticalScrollIndicator={false}>
+      {/* Kingdom owner */}
+      <View style={[estStyles.sumRow, { backgroundColor: `${colors.gold}15`, marginBottom: 12 }]}>
+        <Text style={[estStyles.bidLabel, { color: colors.textMuted, marginBottom: 4 }]}>صاحب المملكة</Text>
+        <View style={{ flexDirection: "row-reverse", gap: 6 }}>
+          {players.map((p, i) => (
+            <TouchableOpacity key={p.id} onPress={() => setKingdomIdx(i)}
+              style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: i === kingdomIdx ? colors.gold : colors.surfaceRaised }}>
+              <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 12, color: i === kingdomIdx ? colors.background : colors.textMuted }}>{p.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {!subGame ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>اختار نوع اللعبة</Text>
+          <View style={{ flexDirection: "row-reverse", flexWrap: "wrap", gap: 10 }}>
+            {KSARA_SUBGAMES.map((sg) => (
+              <TouchableOpacity key={sg.id} onPress={() => { setSubGame(sg.id); Haptics.selectionAsync(); }}
+                style={{ width: "47%", paddingVertical: 18, borderRadius: 14, alignItems: "center", gap: 4, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+                <Text style={{ fontSize: 26 }}>{sg.emoji}</Text>
+                <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 16, color: colors.text }}>{sg.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </>
+      ) : subGame === "complex" ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كومبلكس — نقاط كل لاعب (سالبة)</Text>
+          {players.map((p) => (
+            <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
+              <Stepper value={complexScores[p.id]} onChange={(v) => setComplexScores((prev) => ({ ...prev, [p.id]: v }))} min={-999} max={0} colors={colors} />
+              <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+            </View>
+          ))}
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={() => setSubGame(null)} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold }]}>
+              <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : subGame === "tarneeb" ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>طرنيب — كم لطشة أخذ كل لاعب؟ (+١٠ لكل)</Text>
+          {players.map((p) => (
+            <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
+              <Stepper value={tricks[p.id]} onChange={(v) => setTricks((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+              <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+            </View>
+          ))}
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={() => setSubGame(null)} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold }]}>
+              <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : subGame === "ltashin" ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>لطشين — من أخذ آخر لطشتين؟</Text>
+          <Text style={[estStyles.bidLabel, { color: colors.textDim, textAlign: "center", marginBottom: 10 }]}>اللطشة ١٢: -٦٠ | اللطشة ١٣: -٧٠</Text>
+          {(["ltash12", "ltash13"] as const).map((key) => {
+            const isL12 = key === "ltash12";
+            const val = isL12 ? ltash12 : ltash13;
+            const setVal = isL12 ? setLtash12 : setLtash13;
+            return (
+              <View key={key} style={{ marginBottom: 12 }}>
+                <Text style={[estStyles.bidLabel, { color: colors.textMuted, textAlign: "right", marginBottom: 6 }]}>
+                  {isL12 ? "اللطشة ١٢ (-٦٠):" : "اللطشة ١٣ (-٧٠):"}
+                </Text>
+                <View style={{ flexDirection: "row-reverse", gap: 8 }}>
+                  {players.map((p) => (
+                    <TouchableOpacity key={p.id} onPress={() => setVal(val === p.id ? null : p.id)}
+                      style={{ flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: "center", backgroundColor: val === p.id ? `${colors.red}33` : colors.surface, borderWidth: 1, borderColor: val === p.id ? colors.red : colors.border }}>
+                      <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 13, color: val === p.id ? colors.red : colors.text }}>{p.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            );
+          })}
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={() => setSubGame(null)} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold }]}>
+              <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : subGame === "terkis" ? (
+        <>
+          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>تركس — اضغط بترتيب الإنهاء</Text>
+          {players.map((p) => {
+            const idx = finishOrder.indexOf(p.id);
+            const selected = idx !== -1;
+            return (
+              <TouchableOpacity key={p.id} onPress={() => toggleFinish(p.id)}
+                style={[estStyles.playerRow, { backgroundColor: selected ? `${colors.gold}22` : colors.surface, borderWidth: 1, borderColor: selected ? colors.gold : colors.border }]}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: selected ? colors.gold : colors.surfaceRaised, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 14, color: selected ? colors.background : colors.textDim }}>{selected ? `#${idx + 1}` : "?"}</Text>
+                </View>
+                <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                {selected && <Text style={{ fontFamily: "IBMPlexMono_400Regular", fontSize: 18, color: colors.gold }}>+{KSARA_TERKIS_VALS[idx] ?? 50}</Text>}
+              </TouchableOpacity>
+            );
+          })}
+          <View style={estStyles.btnRow}>
+            <TouchableOpacity onPress={() => { setSubGame(null); setFinishOrder([]); }} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleSubmit} disabled={finishOrder.length < players.length}
+              style={[estStyles.submitBtn, { backgroundColor: finishOrder.length < players.length ? colors.surfaceRaised : colors.gold }]}>
+              <Text style={[estStyles.submitBtnText, { color: finishOrder.length < players.length ? colors.textDim : colors.background }]}>تسجيل</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+// ─── KOUT BO (كوت بو) ─────────────────────────────────────────────────────────
+function KoutBoEntry({ players, onSubmit, onClose }: {
+  players: Player[];
+  onSubmit: (s: Record<string, number>) => void; onClose: () => void;
+}) {
+  const colors = useColors();
+  const [teamATricks, setTeamATricks] = useState(0);
+  const teamBTricks = 13 - teamATricks;
+  const teamAKoutBo = teamATricks === 13;
+  const teamBKoutBo = teamBTricks === 13;
+  const teamAKout = teamATricks >= 7;
+  const teamBKout = teamBTricks >= 7;
+
+  const handleSubmit = () => {
+    const aScore = teamAKoutBo ? 2 : teamAKout ? 1 : 0;
+    const bScore = teamBKoutBo ? 2 : teamBKout ? 1 : 0;
+    const scores: Record<string, number> = {};
+    [players[0], players[2]].forEach((p) => { if (p) scores[p.id] = aScore; });
+    [players[1], players[3]].forEach((p) => { if (p) scores[p.id] = bScore; });
+    onSubmit(scores);
+  };
+
+  const TeamCard = ({ label, tricks, kout, koutBo, names }: {
+    label: string; tricks: number; kout: boolean; koutBo: boolean; names: string[];
+  }) => (
+    <View style={{
+      flex: 1, borderRadius: 14, padding: 14, alignItems: "center", gap: 6, borderWidth: 2,
+      backgroundColor: kout ? `${colors.success}15` : colors.surface,
+      borderColor: kout ? colors.success : colors.border,
+    }}>
+      <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 13, color: colors.textMuted }}>{label}</Text>
+      <Text style={{ fontFamily: "IBMPlexMono_400Regular", fontSize: 32, color: kout ? colors.success : colors.text }}>{tricks}</Text>
+      {names.map((n, i) => <Text key={i} style={{ fontFamily: "Tajawal_400Regular", fontSize: 11, color: colors.textDim }}>{n}</Text>)}
+      {koutBo && <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 13, color: colors.success }}>🏆 كوت بو! +٢</Text>}
+      {kout && !koutBo && <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 12, color: colors.success }}>✅ كوت! +١</Text>}
+    </View>
+  );
+
+  return (
+    <ScrollView showsVerticalScrollIndicator={false}>
+      <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة أخذ فريق أ؟</Text>
+      <View style={{ alignItems: "center", marginVertical: 16 }}>
+        <Stepper value={teamATricks} onChange={setTeamATricks} min={0} max={13} colors={colors} />
+      </View>
+      <View style={{ flexDirection: "row-reverse", gap: 10, marginBottom: 16 }}>
+        <TeamCard label="فريق أ ♠" tricks={teamATricks} kout={teamAKout} koutBo={teamAKoutBo}
+          names={[players[0]?.name, players[2]?.name].filter(Boolean) as string[]} />
+        <TeamCard label="فريق ب ♥" tricks={teamBTricks} kout={teamBKout} koutBo={teamBKoutBo}
+          names={[players[1]?.name, players[3]?.name].filter(Boolean) as string[]} />
+      </View>
+      <View style={[estStyles.sumRow, { backgroundColor: `${colors.gold}11` }]}>
+        <Text style={[estStyles.sumText, { color: colors.gold }]}>
+          {teamAKout && !teamBKout ? `فريق أ كوت${teamAKoutBo ? " بو" : ""}! 🎉` :
+           teamBKout && !teamAKout ? `فريق ب كوت${teamBKoutBo ? " بو" : ""}! 🎉` : "لا يوجد كوت بعد"}
+        </Text>
+      </View>
+      <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold, marginTop: 12 }]}>
+        <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل الجولة</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+
 // ─── SHELL ────────────────────────────────────────────────────────────────────
 export function ScoreEntryModal({ visible, players, roundNumber, gameId, rules, onClose, onSubmit }: Props) {
   const colors = useColors();
@@ -1617,6 +1989,9 @@ export function ScoreEntryModal({ visible, players, roundNumber, gameId, rules, 
   const isHarreega = gameId === "harreega";
   const isNthaleh = gameId === "nthaleh";
   const is400 = gameId === "400";
+  const isEstimation = gameId === "estimation";
+  const isKsara = gameId === "ksara";
+  const isKoutBo = gameId === "kout_bo";
 
   const GAME_LABELS: Record<string, string> = {
     tarneeb: "طرنيب عادي", tarneeb_sy: "طرنيب سوري",
@@ -1624,6 +1999,7 @@ export function ScoreEntryModal({ visible, players, roundNumber, gameId, rules, 
     "400": "٤٠٠", hand: "هاند / كنكان", baloot: "بلوت", basra: "بصرة",
     leekha: "ليخة", domino: "دومينو", jackaroo: "جاكارو", jackaroo_cx: "جاكارو كومبلكس",
     harreega: "حريقة", nthaleh: "نذالة",
+    estimation: "إستميشن", ksara: "كسرة", kout_bo: "كوت بو",
   };
 
   const title = `جولة ${roundNumber}${gameId ? ` — ${GAME_LABELS[gameId] ?? ""}` : ""}`;
@@ -1668,6 +2044,12 @@ export function ScoreEntryModal({ visible, players, roundNumber, gameId, rules, 
           <NthalehEntry players={players} onSubmit={onSubmit} onClose={onClose} />
         ) : is400 ? (
           <FourHundredEntry players={players} onSubmit={onSubmit} onClose={onClose} />
+        ) : isEstimation ? (
+          <EstimationEntry players={players} roundNumber={roundNumber} onSubmit={onSubmit} onClose={onClose} />
+        ) : isKsara ? (
+          <KsaraEntry players={players} onSubmit={onSubmit} onClose={onClose} />
+        ) : isKoutBo ? (
+          <KoutBoEntry players={players} onSubmit={onSubmit} onClose={onClose} />
         ) : (
           <GenericEntry players={players} onSubmit={onSubmit} onClose={onClose} />
         )}

@@ -45,8 +45,7 @@ export default function NewSessionScreen() {
   const [teamAssignment, setTeamAssignment] = useState<number[]>([0, 0, 1, 1]);
   const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
-  const [antiCheat, setAntiCheat] = useState(false);
-  const [acTimeoutSecs, setAcTimeoutSecs] = useState(10);
+  const [antiCheat, setAntiCheat] = useState(true);
   const [debtEnabled, setDebtEnabled] = useState(false);
   const [debtPerPoint, setDebtPerPoint] = useState("0.10");
   const [gameRules, setGameRules] = useState<GameRules>({});
@@ -183,7 +182,6 @@ export default function NewSessionScreen() {
       targetScore: targetScore || selectedGame.defaultTarget,
       createdAt: Date.now(),
       antiCheat: antiCheat || undefined,
-      antiCheatTimeout: antiCheat ? acTimeoutSecs : undefined,
       debtPerPoint: debtEnabled ? parseFloat(debtPerPoint) || 0.1 : undefined,
       rules: Object.keys(cleanRules).length > 0 ? cleanRules : undefined,
     };
@@ -201,7 +199,7 @@ export default function NewSessionScreen() {
         targetScore || selectedGame.defaultTarget,
         hostName.trim(),
         antiCheat || undefined,
-        antiCheat ? acTimeoutSecs : undefined
+        undefined
       );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace({
@@ -772,7 +770,7 @@ export default function NewSessionScreen() {
               </View>
             )}
 
-            {/* Anti-cheat toggle */}
+            {/* Objection system toggle */}
             <View style={[styles.toggleBlock, { backgroundColor: colors.surface }]}>
               <View style={styles.toggleRow}>
                 <TouchableOpacity
@@ -797,39 +795,13 @@ export default function NewSessionScreen() {
                 </TouchableOpacity>
                 <View style={styles.toggleText}>
                   <Text style={[styles.toggleLabel, { color: colors.text }]}>
-                    👀 مانع الغش
+                    🚨 نظام الاعتراض
                   </Text>
                   <Text style={[styles.toggleDesc, { color: colors.textMuted }]}>
-                    تصويت الأغلبية قبل تسجيل كل جولة
+                    زر اعتراض خفيف — أي لاعب يضغطه لو حس في غش
                   </Text>
                 </View>
               </View>
-              {antiCheat && (
-                <View style={[styles.acTimeoutRow, { borderTopColor: colors.border }]}>
-                  <Text style={[styles.acTimeoutLabel, { color: colors.textMuted }]}>
-                    مهلة التصويت
-                  </Text>
-                  <View style={styles.ruleStepperRow}>
-                    {[5, 10, 15, 30].map((v) => (
-                      <TouchableOpacity
-                        key={v}
-                        onPress={() => { setAcTimeoutSecs(v); Haptics.selectionAsync(); }}
-                        style={[
-                          styles.ruleStepBtn,
-                          {
-                            backgroundColor: acTimeoutSecs === v ? colors.gold : colors.surfaceRaised,
-                            borderColor: acTimeoutSecs === v ? colors.gold : colors.border,
-                          },
-                        ]}
-                      >
-                        <Text style={[styles.ruleStepBtnText, { color: acTimeoutSecs === v ? colors.background : colors.textMuted }]}>
-                          {v}s
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </View>
-              )}
             </View>
 
             {/* Debt tracker toggle */}

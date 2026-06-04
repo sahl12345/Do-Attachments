@@ -11,6 +11,7 @@ export interface GameDef {
   isTeam: boolean;
   lowerIsBetter: boolean;
   eliminationScore?: number;
+  defaultRounds?: number;
   icon: string;
 }
 
@@ -225,6 +226,49 @@ export const GAMES: GameDef[] = [
     isTeam: false,
     lowerIsBetter: false,
     icon: "star",
+  },
+  {
+    id: "estimation",
+    name: "إستميشن",
+    playerLabel: "٤ لاعبين",
+    minPlayers: 4,
+    maxPlayers: 4,
+    difficulty: 4,
+    scoringType: "مزايدة + لطشات",
+    description: "بيد كم لطشة بتاخذ — ١٨ جولة، مجموع البيد ما يساوي ١٣",
+    defaultTarget: 0,
+    isTeam: false,
+    lowerIsBetter: false,
+    defaultRounds: 18,
+    icon: "target",
+  },
+  {
+    id: "ksara",
+    name: "كسرة",
+    playerLabel: "٤ لاعبين",
+    minPlayers: 4,
+    maxPlayers: 4,
+    difficulty: 5,
+    scoringType: "ممالك + ٤ ألعاب",
+    description: "٤ ممالك — كومبلكس + طرنيب + لطشين + تركس لكل مملكة",
+    defaultTarget: 0,
+    isTeam: false,
+    lowerIsBetter: false,
+    icon: "layers",
+  },
+  {
+    id: "kout_bo",
+    name: "كوت بو",
+    playerLabel: "٤ لاعبين",
+    minPlayers: 4,
+    maxPlayers: 4,
+    difficulty: 3,
+    scoringType: "فريقين + كوت",
+    description: "أول فريق يوصل ٧ نقاط يفوز — ٧+ لطشات كوت، ١٣ كوت بو",
+    defaultTarget: 7,
+    isTeam: true,
+    lowerIsBetter: false,
+    icon: "award",
   },
 ];
 
