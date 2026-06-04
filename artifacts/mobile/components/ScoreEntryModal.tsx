@@ -1606,53 +1606,84 @@ function EstimationEntry({ players, roundNumber, onSubmit, onClose }: {
 
   const totalBid = players.reduce((s, p) => s + bids[p.id], 0);
   const bidIsThirteen = totalBid === 13;
+  const isOver = totalBid > 13;
+  const isUnder = totalBid > 0 && totalBid < 13;
   const totalActual = players.reduce((s, p) => s + actuals[p.id], 0);
-  const roundType = roundNumber <= 13 ? "جولة عادية" : "كولور 🎨";
+  const roundLabel = roundNumber <= 13 ? "جولة عادية" : "كولور 🎨";
 
   const calcScores = (): Record<string, number> => {
     const successCount = players.filter((p) => bids[p.id] === actuals[p.id]).length;
+    const dashBonus = isOver ? 25 : isUnder ? 33 : 20;
     const scores: Record<string, number> = {};
     for (const p of players) {
       const bid = bids[p.id];
       const actual = actuals[p.id];
       const success = bid === actual;
       const isDash = bid === 0;
+      const isCall = bid === 13;
       const isAlone = success && successCount === 1;
       if (success) {
         let score = 10 + actual;
+        if (isCall) score += 10;
         if (isAlone) score += 10;
-        if (isDash) score += 33;
+        if (isDash) score += dashBonus;
         scores[p.id] = score;
       } else {
-        const diff = Math.abs(bid - actual);
-        let penalty = diff;
-        if (isDash && actual > 0) penalty += 25;
+        let penalty = Math.abs(bid - actual);
+        if (isCall) penalty += 10;
+        if (isAlone) penalty += 10;
+        if (isDash && actual > 0) penalty += dashBonus;
         scores[p.id] = -penalty;
       }
     }
     return scores;
   };
 
+  const variantColor = isOver ? colors.success : isUnder ? colors.red : colors.gold;
+  const variantLabel = isOver ? "أوفر ⬆️ (+٢٥ للداش)" : isUnder ? "أندر ⬇️ (+٣٣ للداش)" : "";
+
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
-      <View style={[estStyles.badge, { backgroundColor: `${colors.gold}22` }]}>
-        <Text style={[estStyles.badgeText, { color: colors.gold }]}>
-          جولة {roundNumber} من ١٨ — {roundType}
-        </Text>
+      <View style={{ flexDirection: "row-reverse", justifyContent: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <View style={[estStyles.badge, { backgroundColor: `${colors.gold}22` }]}>
+          <Text style={[estStyles.badgeText, { color: colors.gold }]}>جولة {roundNumber} من ١٨ — {roundLabel}</Text>
+        </View>
+        {variantLabel !== "" && (
+          <View style={[estStyles.badge, { backgroundColor: `${variantColor}22` }]}>
+            <Text style={[estStyles.badgeText, { color: variantColor }]}>{variantLabel}</Text>
+          </View>
+        )}
       </View>
 
       {step === "bid" ? (
         <>
           <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة تطلب؟</Text>
-          {players.map((p) => (
-            <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
-              <Stepper value={bids[p.id]} onChange={(v) => setBids((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
-              <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
-            </View>
-          ))}
-          <View style={[estStyles.sumRow, { backgroundColor: bidIsThirteen ? `${colors.red}22` : `${colors.success}11` }]}>
-            <Text style={[estStyles.sumText, { color: bidIsThirteen ? colors.red : colors.textMuted }]}>
-              {bidIsThirteen ? "⚠️ المجموع = ١٣! عدّل طلب واحد" : `المجموع: ${totalBid}`}
+          {players.map((p) => {
+            const bid = bids[p.id];
+            const isCall = bid === 13;
+            const isDash = bid === 0;
+            return (
+              <View key={p.id} style={[estStyles.playerRow, {
+                backgroundColor: colors.surface,
+                borderWidth: 1,
+                borderColor: isCall ? colors.gold : isDash ? `${colors.success}55` : "transparent",
+              }]}>
+                <Stepper value={bid} onChange={(v) => setBids((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+                <View style={estStyles.playerInfo}>
+                  <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                  {isCall && <Text style={[estStyles.bidLabel, { color: colors.gold }]}>⭐ كول! +١٠ / -١٠</Text>}
+                  {isDash && <Text style={[estStyles.bidLabel, { color: colors.success }]}>داش 🤫</Text>}
+                </View>
+              </View>
+            );
+          })}
+          <View style={[estStyles.sumRow, {
+            backgroundColor: bidIsThirteen ? `${colors.red}22` : isOver ? `${colors.success}11` : isUnder ? `${colors.red}11` : `${colors.gold}11`,
+          }]}>
+            <Text style={[estStyles.sumText, { color: bidIsThirteen ? colors.red : variantColor }]}>
+              {bidIsThirteen
+                ? "⚠️ المجموع = ١٣! عدّل طلب واحد"
+                : `المجموع: ${totalBid}${variantLabel ? ` — ${isOver ? "أوفر" : "أندر"}` : ""}`}
             </Text>
           </View>
           <View style={estStyles.btnRow}>
@@ -1673,13 +1704,15 @@ function EstimationEntry({ players, roundNumber, onSubmit, onClose }: {
           <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة أخذ كل لاعب؟</Text>
           {players.map((p) => {
             const success = actuals[p.id] === bids[p.id];
+            const isDash = bids[p.id] === 0;
+            const isCall = bids[p.id] === 13;
             return (
               <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
                 <Stepper value={actuals[p.id]} onChange={(v) => setActuals((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
                 <View style={estStyles.playerInfo}>
                   <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
-                  <Text style={[estStyles.bidLabel, { color: success ? colors.success : colors.textDim }]}>
-                    طلب: {bids[p.id]} {success ? "✅" : "❌"}
+                  <Text style={[estStyles.bidLabel, { color: success ? colors.success : colors.red }]}>
+                    طلب: {bids[p.id]}{isDash ? " (داش)" : isCall ? " ⭐" : ""} {success ? "✅" : "❌"}
                   </Text>
                 </View>
               </View>
@@ -1739,16 +1772,50 @@ function KsaraEntry({ players, onSubmit, onClose }: {
   const [tricks, setTricks] = useState<Record<string, number>>(() =>
     Object.fromEntries(players.map((p) => [p.id, 0]))
   );
-  const [complexScores, setComplexScores] = useState<Record<string, number>>(() =>
-    Object.fromEntries(players.map((p) => [p.id, 0]))
-  );
   const [ltash12, setLtash12] = useState<string | null>(null);
   const [ltash13, setLtash13] = useState<string | null>(null);
   const [finishOrder, setFinishOrder] = useState<string[]>([]);
 
+  // كومبلكس state (full TerkisComplex-style)
+  const [dinary, setDinary] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [banat, setBanat] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [ltosh, setLtosh] = useState<Record<string, number>>(() => Object.fromEntries(players.map((p) => [p.id, 0])));
+  const [sheikOwner, setSheikOwner] = useState<string | null>(null);
+  const [hasTadveel, setHasTadveel] = useState(false);
+  const [tadveelCard, setTadveelCard] = useState<"sheik" | "bint" | null>(null);
+  const [tadveelRevealer, setTadveelRevealer] = useState<string | null>(null);
+  const [tadveelTaker, setTadveelTaker] = useState<string | null>(null);
+
+  const resetComplex = () => {
+    setDinary(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setBanat(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setLtosh(Object.fromEntries(players.map((p) => [p.id, 0])));
+    setSheikOwner(null);
+    setHasTadveel(false);
+    setTadveelCard(null);
+    setTadveelRevealer(null);
+    setTadveelTaker(null);
+  };
+
   const toggleFinish = (id: string) => {
     setFinishOrder((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
+
+  const calcComplexScores = (): Record<string, number> => {
+    const s: Record<string, number> = {};
+    players.forEach((p) => {
+      s[p.id] = (dinary[p.id] ?? 0) * -10 + (banat[p.id] ?? 0) * -25 + (ltosh[p.id] ?? 0) * -15;
+      if (p.id === sheikOwner) s[p.id] -= 75;
+    });
+    if (hasTadveel && tadveelCard && tadveelRevealer && tadveelTaker) {
+      const val = tadveelCard === "sheik" ? 75 : 25;
+      s[tadveelRevealer] = (s[tadveelRevealer] ?? 0) + val;
+      s[tadveelTaker] = (s[tadveelTaker] ?? 0) - val;
+    }
+    return s;
+  };
+
+  const complexValid = !hasTadveel || (!!tadveelCard && !!tadveelRevealer && !!tadveelTaker);
 
   const handleSubmit = () => {
     if (!subGame) return;
@@ -1763,18 +1830,22 @@ function KsaraEntry({ players, onSubmit, onClose }: {
       if (ltash12) scores[ltash12] = (scores[ltash12] ?? 0) - 60;
       if (ltash13) scores[ltash13] = (scores[ltash13] ?? 0) - 70;
     } else {
-      scores = { ...complexScores };
+      scores = calcComplexScores();
     }
     onSubmit(scores);
   };
 
-  const kingdomOwner = players[kingdomIdx % players.length];
+  const BackBtn = ({ onPress }: { onPress: () => void }) => (
+    <TouchableOpacity onPress={onPress} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
+      <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+    </TouchableOpacity>
+  );
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false}>
+    <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       {/* Kingdom owner */}
       <View style={[estStyles.sumRow, { backgroundColor: `${colors.gold}15`, marginBottom: 12 }]}>
-        <Text style={[estStyles.bidLabel, { color: colors.textMuted, marginBottom: 4 }]}>صاحب المملكة</Text>
+        <Text style={[estStyles.bidLabel, { color: colors.textMuted, marginBottom: 4 }]}>👑 صاحب المملكة</Text>
         <View style={{ flexDirection: "row-reverse", gap: 6 }}>
           {players.map((p, i) => (
             <TouchableOpacity key={p.id} onPress={() => setKingdomIdx(i)}
@@ -1800,19 +1871,131 @@ function KsaraEntry({ players, onSubmit, onClose }: {
         </>
       ) : subGame === "complex" ? (
         <>
-          <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كومبلكس — نقاط كل لاعب (سالبة)</Text>
+          {/* ديناري */}
+          <Text style={[s.label, { color: colors.textMuted }]}>♦ ديناري (-١٠ لكل)</Text>
           {players.map((p) => (
-            <View key={p.id} style={[estStyles.playerRow, { backgroundColor: colors.surface }]}>
-              <Stepper value={complexScores[p.id]} onChange={(v) => setComplexScores((prev) => ({ ...prev, [p.id]: v }))} min={-999} max={0} colors={colors} />
-              <Text style={[estStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+            <View key={`d-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={dinary[p.id] ?? 0} onChange={(v) => setDinary((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                <Text style={[tkStyles.playerScore, { color: (dinary[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(dinary[p.id] ?? 0) > 0 ? `${(dinary[p.id] ?? 0) * -10}` : "٠"}
+                </Text>
+              </View>
             </View>
           ))}
-          <View style={estStyles.btnRow}>
-            <TouchableOpacity onPress={() => setSubGame(null)} style={[estStyles.backBtn, { borderColor: colors.borderStrong }]}>
-              <Text style={[estStyles.backBtnText, { color: colors.textMuted }]}>◀ رجعت</Text>
+
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* بنات */}
+          <Text style={[s.label, { color: colors.textMuted }]}>Q بنت (-٢٥ لكل)</Text>
+          {players.map((p) => (
+            <View key={`b-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={banat[p.id] ?? 0} onChange={(v) => setBanat((prev) => ({ ...prev, [p.id]: v }))} min={0} max={4} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                <Text style={[tkStyles.playerScore, { color: (banat[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(banat[p.id] ?? 0) > 0 ? `${(banat[p.id] ?? 0) * -25}` : "٠"}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* لطشات */}
+          <Text style={[s.label, { color: colors.textMuted }]}>لطشات (-١٥ لكل)</Text>
+          {players.map((p) => (
+            <View key={`l-${p.id}`} style={tkStyles.playerRow}>
+              <Stepper value={ltosh[p.id] ?? 0} onChange={(v) => setLtosh((prev) => ({ ...prev, [p.id]: v }))} min={0} max={13} colors={colors} />
+              <View style={tkStyles.playerInfo}>
+                <Text style={[tkStyles.playerName, { color: colors.text }]}>{p.name}</Text>
+                <Text style={[tkStyles.playerScore, { color: (ltosh[p.id] ?? 0) > 0 ? colors.red : colors.textDim, fontFamily: Fonts.mono }]}>
+                  {(ltosh[p.id] ?? 0) > 0 ? `${(ltosh[p.id] ?? 0) * -15}` : "٠"}
+                </Text>
+              </View>
+            </View>
+          ))}
+
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+
+          {/* شيخ الكبة */}
+          <Text style={[s.label, { color: colors.textMuted }]}>K♠ شيخ الكبة (-٧٥) — من أخذه؟</Text>
+          <View style={{ gap: 8, marginBottom: 12 }}>
+            {players.map((p) => (
+              <TouchableOpacity key={`sk-${p.id}`}
+                onPress={() => { Haptics.selectionAsync(); setSheikOwner(sheikOwner === p.id ? null : p.id); }}
+                style={[tkStyles.radioBtn, sheikOwner === p.id
+                  ? { backgroundColor: `${colors.red}22`, borderColor: colors.red }
+                  : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                <Text style={[tkStyles.playerScore, { fontFamily: Fonts.mono, color: sheikOwner === p.id ? colors.red : colors.textDim }]}>
+                  {sheikOwner === p.id ? "-75" : ""}
+                </Text>
+                <Text style={[tkStyles.playerName, { color: sheikOwner === p.id ? colors.red : colors.text }]}>{p.name}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity onPress={() => { Haptics.selectionAsync(); setSheikOwner(null); }}
+              style={[tkStyles.radioBtn, !sheikOwner
+                ? { backgroundColor: colors.surface, borderColor: colors.borderStrong }
+                : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+              <Text style={[tkStyles.playerName, { color: !sheikOwner ? colors.text : colors.textDim }]}>ما أخذه أحد</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold }]}>
-              <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل</Text>
+          </View>
+
+          {/* التدبيل */}
+          <View style={[s.divider, { backgroundColor: colors.border }]} />
+          <TouchableOpacity
+            onPress={() => { Haptics.selectionAsync(); setHasTadveel(!hasTadveel); setTadveelCard(null); setTadveelRevealer(null); setTadveelTaker(null); }}
+            style={[tkStyles.radioBtn, hasTadveel
+              ? { backgroundColor: `${colors.gold}22`, borderColor: colors.gold }
+              : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}
+          >
+            <Text style={[tkStyles.playerName, { color: hasTadveel ? colors.gold : colors.text }]}>🃏 في تدبيل؟</Text>
+          </TouchableOpacity>
+
+          {hasTadveel && (
+            <View style={{ marginTop: 10, gap: 10 }}>
+              <Text style={[s.subHint, { color: colors.textDim }]}>الورقة المكشوفة</Text>
+              <View style={{ flexDirection: "row-reverse", gap: 10 }}>
+                {([{ id: "sheik" as const, label: "K♠ شيخ (+٧٥)" }, { id: "bint" as const, label: "Q بنت (+٢٥)" }]).map(({ id, label }) => (
+                  <TouchableOpacity key={id} onPress={() => { Haptics.selectionAsync(); setTadveelCard(id); }}
+                    style={[s.teamBtn, { flex: 1 }, tadveelCard === id
+                      ? { backgroundColor: colors.gold }
+                      : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}>
+                    <Text style={[s.teamBtnText, { color: tadveelCard === id ? colors.background : colors.textMuted }]}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[s.subHint, { color: colors.textDim }]}>من كشف؟ (يأخذ +)</Text>
+              <View style={{ gap: 6 }}>
+                {players.map((p) => (
+                  <TouchableOpacity key={`tr-${p.id}`} onPress={() => { Haptics.selectionAsync(); setTadveelRevealer(p.id); }}
+                    style={[tkStyles.radioBtn, tadveelRevealer === p.id
+                      ? { backgroundColor: `${colors.success}22`, borderColor: colors.success }
+                      : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                    <Text style={[tkStyles.playerName, { color: tadveelRevealer === p.id ? colors.success : colors.text }]}>{p.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={[s.subHint, { color: colors.textDim }]}>من أخذ؟ (يدفع -)</Text>
+              <View style={{ gap: 6 }}>
+                {players.map((p) => (
+                  <TouchableOpacity key={`tt-${p.id}`} onPress={() => { Haptics.selectionAsync(); setTadveelTaker(p.id); }}
+                    style={[tkStyles.radioBtn, tadveelTaker === p.id
+                      ? { backgroundColor: `${colors.red}22`, borderColor: colors.red }
+                      : { backgroundColor: colors.surfaceRaised, borderColor: colors.border }]}>
+                    <Text style={[tkStyles.playerName, { color: tadveelTaker === p.id ? colors.red : colors.text }]}>{p.name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+          <View style={estStyles.btnRow}>
+            <BackBtn onPress={() => { setSubGame(null); resetComplex(); }} />
+            <TouchableOpacity onPress={handleSubmit} disabled={!complexValid}
+              style={[estStyles.submitBtn, { backgroundColor: complexValid ? colors.gold : colors.surfaceRaised }]}>
+              <Text style={[estStyles.submitBtnText, { color: complexValid ? colors.background : colors.textDim }]}>تسجيل</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -1900,12 +2083,15 @@ function KsaraEntry({ players, onSubmit, onClose }: {
 }
 
 // ─── KOUT BO (كوت بو) ─────────────────────────────────────────────────────────
+const KOUT_TARGETS = [7, 11, 14] as const;
+
 function KoutBoEntry({ players, onSubmit, onClose }: {
   players: Player[];
   onSubmit: (s: Record<string, number>) => void; onClose: () => void;
 }) {
   const colors = useColors();
   const [teamATricks, setTeamATricks] = useState(0);
+  const [target, setTarget] = useState<7 | 11 | 14>(7);
   const teamBTricks = 13 - teamATricks;
   const teamAKoutBo = teamATricks === 13;
   const teamBKoutBo = teamBTricks === 13;
@@ -1939,6 +2125,26 @@ function KoutBoEntry({ players, onSubmit, onClose }: {
 
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
+      {/* هدف الفوز */}
+      <View style={{ marginBottom: 14 }}>
+        <Text style={[estStyles.bidLabel, { color: colors.textMuted, textAlign: "center", marginBottom: 8 }]}>هدف الفوز (نقاط)</Text>
+        <View style={{ flexDirection: "row-reverse", gap: 8, justifyContent: "center" }}>
+          {KOUT_TARGETS.map((t) => (
+            <TouchableOpacity
+              key={t}
+              onPress={() => { setTarget(t); Haptics.selectionAsync(); }}
+              style={{
+                paddingHorizontal: 22, paddingVertical: 10, borderRadius: 20, borderWidth: 2,
+                backgroundColor: target === t ? colors.gold : colors.surface,
+                borderColor: target === t ? colors.gold : colors.border,
+              }}
+            >
+              <Text style={{ fontFamily: "Cairo_700Bold", fontSize: 15, color: target === t ? colors.background : colors.textMuted }}>{t}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
       <Text style={[estStyles.stepLabel, { color: colors.textMuted }]}>كم لطشة أخذ فريق أ؟</Text>
       <View style={{ alignItems: "center", marginVertical: 16 }}>
         <Stepper value={teamATricks} onChange={setTeamATricks} min={0} max={13} colors={colors} />
@@ -1955,7 +2161,10 @@ function KoutBoEntry({ players, onSubmit, onClose }: {
            teamBKout && !teamAKout ? `فريق ب كوت${teamBKoutBo ? " بو" : ""}! 🎉` : "لا يوجد كوت بعد"}
         </Text>
       </View>
-      <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold, marginTop: 12 }]}>
+      <Text style={[estStyles.bidLabel, { color: colors.textDim, textAlign: "center", marginTop: 6 }]}>
+        الفوز بـ {target} نقطة — كوت بو = +٢ | كوت = +١
+      </Text>
+      <TouchableOpacity onPress={handleSubmit} style={[estStyles.submitBtn, { backgroundColor: colors.gold, marginTop: 14 }]}>
         <Text style={[estStyles.submitBtnText, { color: colors.background }]}>تسجيل الجولة</Text>
       </TouchableOpacity>
     </ScrollView>
