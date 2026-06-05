@@ -46,6 +46,7 @@ export interface Session {
   antiCheat?: boolean;
   antiCheatTimeout?: number; // seconds, default 10
   debtPerPoint?: number;
+  orders?: Record<string, string>;
   rules?: GameRules;
 }
 

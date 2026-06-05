@@ -11,6 +11,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -137,8 +138,9 @@ export default function SessionScreen() {
   const [objectionBanner, setObjectionBanner] = useState<string | null>(null);
   const objectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debt tracker
-  const [paidSet, setPaidSet] = useState<Set<string>>(new Set());
+  const [sessionOrders, setSessionOrders] = useState<Record<string, string>>(
+    () => localSession?.orders ?? {}
+  );
   const [onlineActionError, setOnlineActionError] = useState<string | null>(null);
 
   // ── local session ──────────────────────────────────────────────────────────
@@ -253,6 +255,19 @@ export default function SessionScreen() {
       },
     ]);
   };
+
+  const handleSetOrder = useCallback(
+    (playerId: string, text: string) => {
+      setSessionOrders((prev) => {
+        const updated = { ...prev, [playerId]: text };
+        if (!isOnline && id) {
+          updateSession(id, { orders: updated });
+        }
+        return updated;
+      });
+    },
+    [isOnline, id, updateSession]
+  );
 
   // ── ONLINE GAME LOGIC ──────────────────────────────────────────────────────
   const handleStartOnline = async () => {
@@ -732,6 +747,27 @@ export default function SessionScreen() {
           </View>
         )}
 
+        {/* ── تسجيل الطلبات ─────────────────────────────────────────────── */}
+        <View style={[styles.ordersSection, { backgroundColor: colors.surface }]}>
+          <Text style={[styles.ordersTitle, { color: colors.textMuted }]}>☕ تسجيل الطلبات</Text>
+          {sessionPlayers.map((p) => (
+            <View key={p.id} style={[styles.orderRow, { borderTopColor: colors.border }]}>
+              <TextInput
+                style={[
+                  styles.orderInput,
+                  { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
+                ]}
+                placeholder="اكتب طلبك..."
+                placeholderTextColor={colors.textDim}
+                value={sessionOrders[p.id] ?? ""}
+                onChangeText={(text) => handleSetOrder(p.id, text)}
+                textAlign="right"
+              />
+              <Text style={[styles.orderName, { color: colors.text }]}>{p.name}</Text>
+            </View>
+          ))}
+        </View>
+
         {sessionRounds.length > 0 && (
           <View style={styles.roundsSection}>
             <Text style={[styles.roundsTitle, { color: colors.textMuted }]}>
@@ -915,44 +951,20 @@ export default function SessionScreen() {
               </View>
             </View>
 
-            {/* Debt summary — local sessions only */}
-            {localSession?.debtPerPoint && localSession.debtPerPoint > 0 && sessionWinnerId && (
-              <View style={[styles.debtSection, { backgroundColor: colors.surface }]}>
-                <Text style={[styles.debtTitle, { color: colors.textMuted }]}>💸 الحسابات</Text>
-                {scoredPlayers
-                  .filter((p) => p.player.id !== sessionWinnerId)
-                  .map((p) => {
-                    const winnerTotal = scoredPlayers.find((x) => x.player.id === sessionWinnerId)?.total ?? 0;
-                    const diff = Math.abs(winnerTotal - p.total);
-                    const amount = (diff * (localSession.debtPerPoint ?? 0)).toFixed(2);
-                    const paid = paidSet.has(p.player.id);
-                    return (
-                      <TouchableOpacity
-                        key={p.player.id}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          setPaidSet((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(p.player.id)) next.delete(p.player.id);
-                            else next.add(p.player.id);
-                            return next;
-                          });
-                        }}
-                        style={[styles.debtRow, { opacity: paid ? 0.5 : 1 }]}
-                      >
-                        <Text style={[styles.debtPaid, { color: paid ? colors.gold : colors.textDim }]}>
-                          {paid ? "✅ تم" : "اضغط"}
-                        </Text>
-                        <Text style={[styles.debtText, { color: paid ? colors.textDim : colors.text }]}>
-                          <Text style={{ color: colors.red }}>{p.player.name}</Text>
-                          {" يدفع "}
-                          <Text style={{ color: colors.gold, fontFamily: "IBMPlexMono_400Regular" }}>{amount}</Text>
-                          {" دينار لـ "}
-                          <Text style={{ color: colors.gold }}>{winnerPlayer?.name}</Text>
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+            {/* Orders summary in winner overlay */}
+            {sessionPlayers.some((p) => sessionOrders[p.id]?.trim()) && (
+              <View style={[styles.ordersSection, { backgroundColor: colors.surface }]}>
+                <Text style={[styles.ordersTitle, { color: colors.textMuted }]}>☕ الطلبات</Text>
+                {sessionPlayers
+                  .filter((p) => sessionOrders[p.id]?.trim())
+                  .map((p) => (
+                    <View key={p.id} style={[styles.orderRow, { borderTopColor: colors.border }]}>
+                      <Text style={[styles.orderValue, { color: colors.gold }]}>
+                        {sessionOrders[p.id]}
+                      </Text>
+                      <Text style={[styles.orderName, { color: colors.text }]}>{p.name}</Text>
+                    </View>
+                  ))}
               </View>
             )}
 
@@ -1150,12 +1162,28 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "right",
   },
-  // Debt tracker in winner
-  debtSection: { width: "100%", borderRadius: 16, padding: 14, gap: 10 },
-  debtTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "center" },
-  debtRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  debtText: { fontFamily: Fonts.body, fontSize: 13, textAlign: "right", flex: 1, lineHeight: 20 },
-  debtPaid: { fontFamily: Fonts.body, fontSize: 11 },
+  ordersSection: { width: "100%", borderRadius: 16, overflow: "hidden", marginHorizontal: 0 },
+  ordersTitle: { fontFamily: Fonts.body, fontSize: 12, textAlign: "center", paddingVertical: 10 },
+  orderRow: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  orderName: { fontFamily: Fonts.heading, fontSize: 14, textAlign: "right", flex: 0 },
+  orderInput: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    fontSize: 14,
+    fontFamily: Fonts.body,
+  },
+  orderValue: { fontFamily: Fonts.body, fontSize: 14, textAlign: "left", flex: 1 },
   winnerOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",

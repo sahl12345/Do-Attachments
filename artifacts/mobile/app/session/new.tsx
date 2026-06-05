@@ -46,13 +46,12 @@ export default function NewSessionScreen() {
   const [hostName, setHostName] = useState(userName ?? "");
   const [targetScore, setTargetScore] = useState<number>(0);
   const [antiCheat, setAntiCheat] = useState(true);
-  const [debtEnabled, setDebtEnabled] = useState(false);
-  const [debtPerPoint, setDebtPerPoint] = useState("0.10");
   const [gameRules, setGameRules] = useState<GameRules>({});
   const setRule = <K extends keyof GameRules>(key: K, val: GameRules[K]) =>
     setGameRules((prev) => ({ ...prev, [key]: val }));
   const [creatingOnline, setCreatingOnline] = useState(false);
   const [onlineError, setOnlineError] = useState<string | null>(null);
+
   const webTop = Platform.OS === "web" ? 67 : 0;
   const { gameId: preselectedGameId } = useLocalSearchParams<{ gameId?: string }>();
 
@@ -188,7 +187,6 @@ export default function NewSessionScreen() {
       targetScore: targetScore || selectedGame.defaultTarget,
       createdAt: Date.now(),
       antiCheat: antiCheat || undefined,
-      debtPerPoint: debtEnabled ? parseFloat(debtPerPoint) || 0.1 : undefined,
       rules: Object.keys(cleanRules).length > 0 ? cleanRules : undefined,
     };
     addSession(session);
@@ -850,62 +848,6 @@ export default function NewSessionScreen() {
               </View>
             </View>
 
-            {/* Debt tracker toggle */}
-            <View style={[styles.toggleBlock, { backgroundColor: colors.surface }]}>
-              <View style={styles.toggleRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    setDebtEnabled((v) => !v);
-                    Haptics.selectionAsync();
-                  }}
-                  style={[
-                    styles.toggleSwitch,
-                    { backgroundColor: debtEnabled ? colors.gold : colors.border },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.toggleThumb,
-                      {
-                        backgroundColor: colors.background,
-                        transform: [{ translateX: debtEnabled ? 20 : 2 }],
-                      },
-                    ]}
-                  />
-                </TouchableOpacity>
-                <View style={styles.toggleText}>
-                  <Text style={[styles.toggleLabel, { color: colors.text }]}>
-                    💸 حساب الديون
-                  </Text>
-                  <Text style={[styles.toggleDesc, { color: colors.textMuted }]}>
-                    احسب مين يدفع لمين بالنهاية
-                  </Text>
-                </View>
-              </View>
-              {debtEnabled && (
-                <View style={[styles.debtRow, { borderTopColor: colors.border }]}>
-                  <Text style={[styles.debtLabel, { color: colors.textMuted }]}>
-                    قيمة كل نقطة (دينار)
-                  </Text>
-                  <TextInput
-                    style={[
-                      styles.debtInput,
-                      {
-                        backgroundColor: colors.surfaceRaised,
-                        color: colors.text,
-                        borderColor: colors.gold,
-                        fontFamily: Fonts.mono,
-                      },
-                    ]}
-                    value={debtPerPoint}
-                    onChangeText={setDebtPerPoint}
-                    keyboardType="decimal-pad"
-                    textAlign="center"
-                    selectTextOnFocus
-                  />
-                </View>
-              )}
-            </View>
           </ScrollView>
         )}
       </View>
@@ -1144,9 +1086,6 @@ const styles = StyleSheet.create({
   toggleText: { flex: 1, gap: 2 },
   toggleLabel: { fontFamily: Fonts.heading, fontSize: 16, textAlign: "right" },
   toggleDesc: { fontFamily: Fonts.body, fontSize: 12, textAlign: "right" },
-  debtRow: { flexDirection: "row-reverse", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderTopWidth: 1 },
-  debtLabel: { fontFamily: Fonts.body, fontSize: 14 },
-  debtInput: { width: 80, height: 40, borderRadius: 10, borderWidth: 1.5, fontSize: 16, textAlign: "center" },
   targetRow: { flexDirection: "row-reverse", gap: 10, marginTop: 8 },
   targetBtn: {
     flex: 1,
