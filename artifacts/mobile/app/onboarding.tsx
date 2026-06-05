@@ -1,10 +1,8 @@
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Dimensions,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -19,8 +17,6 @@ import { Fonts } from "@/constants/fonts";
 import { useApp } from "@/contexts/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { signInWithGoogle } from "@/services/auth";
-
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const SLIDES = [
   {
@@ -57,22 +53,15 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const flatRef = useRef<FlatList>(null);
   const webTop = Platform.OS === "web" ? 67 : 0;
   const isLast = currentSlide === SLIDES.length - 1;
+  const slide = SLIDES[currentSlide];
 
   const goNext = () => {
-    if (isLast) return;
-    const next = currentSlide + 1;
-    flatRef.current?.scrollToIndex({ index: next, animated: true });
-    setCurrentSlide(next);
+    if (!isLast) setCurrentSlide((s) => s + 1);
   };
 
   const skipToLast = () => {
-    flatRef.current?.scrollToIndex({
-      index: SLIDES.length - 1,
-      animated: true,
-    });
     setCurrentSlide(SLIDES.length - 1);
   };
 
@@ -81,12 +70,9 @@ export default function Onboarding() {
     setError("");
     try {
       await signInWithGoogle();
-      // On web: page navigates away to Google, loading stays true (intentional)
-      // On native: WebBrowser handles it; session set → AppContext fires → routing happens
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } catch (e: any) {
-      const msg: string = e?.message ?? "";
-      // Don't show error if user just cancelled
+    } catch (e: unknown) {
+      const msg: string = (e as { message?: string })?.message ?? "";
       if (!msg.includes("ألغيت")) {
         setError(msg || "حدث خطأ، حاول مرة ثانية");
       }
@@ -125,36 +111,25 @@ export default function Onboarding() {
         {/* ── Slides ── */}
         {step === "slides" && (
           <>
-            <FlatList
-              ref={flatRef}
-              data={SLIDES}
-              horizontal
-              pagingEnabled
-              scrollEnabled={false}
-              showsHorizontalScrollIndicator={false}
-              keyExtractor={(item) => item.id}
-              style={{ flex: 1 }}
-              renderItem={({ item }) => (
-                <View style={[styles.slide, { width: SCREEN_WIDTH }]}>
-                  <View
-                    style={[
-                      styles.iconContainer,
-                      { backgroundColor: colors.surfaceRaised },
-                    ]}
-                  >
-                    <Text style={[styles.icon, { color: colors.gold }]}>
-                      {item.icon}
-                    </Text>
-                  </View>
-                  <Text style={[styles.title, { color: colors.text }]}>
-                    {item.title}
-                  </Text>
-                  <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-                    {item.subtitle}
-                  </Text>
-                </View>
-              )}
-            />
+            {/* Single slide shown at a time — works on both native and web */}
+            <View style={styles.slide}>
+              <View
+                style={[
+                  styles.iconContainer,
+                  { backgroundColor: colors.surfaceRaised },
+                ]}
+              >
+                <Text style={[styles.icon, { color: colors.gold }]}>
+                  {slide.icon}
+                </Text>
+              </View>
+              <Text style={[styles.title, { color: colors.text }]}>
+                {slide.title}
+              </Text>
+              <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+                {slide.subtitle}
+              </Text>
+            </View>
 
             <View style={styles.footer}>
               <View style={styles.dots}>
@@ -184,11 +159,7 @@ export default function Onboarding() {
                       <ActivityIndicator color={colors.background} />
                     ) : (
                       <>
-                        <Text
-                          style={[styles.googleIcon]}
-                        >
-                          G
-                        </Text>
+                        <Text style={styles.googleIcon}>G</Text>
                         <Text
                           style={[
                             styles.googleBtnText,
@@ -229,11 +200,11 @@ export default function Onboarding() {
           </>
         )}
 
-        {/* ── Name step (shown for users without a name) ── */}
+        {/* ── Name step ── */}
         {step === "name" && (
           <View style={styles.authStep}>
             <View style={styles.stepHeader}>
-              <Text style={[styles.stepIcon]}>✌️</Text>
+              <Text style={styles.stepIcon}>✌️</Text>
               <Text style={[styles.stepTitle, { color: colors.text }]}>
                 شو اسمك؟
               </Text>
