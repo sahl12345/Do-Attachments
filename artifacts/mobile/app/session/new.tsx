@@ -133,10 +133,12 @@ export default function NewSessionScreen() {
   const handleNext = () => {
     if (!canNext()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setOnlineError(null);
     setStep((s) => s + 1);
   };
 
   const handleBack = () => {
+    setOnlineError(null);
     if (step === 0) {
       router.back();
     } else if (step === 1) {
