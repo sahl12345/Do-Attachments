@@ -52,6 +52,7 @@ export default function NewSessionScreen() {
   const setRule = <K extends keyof GameRules>(key: K, val: GameRules[K]) =>
     setGameRules((prev) => ({ ...prev, [key]: val }));
   const [creatingOnline, setCreatingOnline] = useState(false);
+  const [onlineError, setOnlineError] = useState<string | null>(null);
   const webTop = Platform.OS === "web" ? 67 : 0;
   const { gameId: preselectedGameId } = useLocalSearchParams<{ gameId?: string }>();
 
@@ -196,6 +197,7 @@ export default function NewSessionScreen() {
 
   const handleStartOnline = async () => {
     if (!selectedGame || !hostName.trim()) return;
+    setOnlineError(null);
     setCreatingOnline(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -211,8 +213,11 @@ export default function NewSessionScreen() {
         pathname: "/session/[id]",
         params: { id: code, hostKey: hostPlayerId },
       });
-    } catch (_e) {
+    } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg = e instanceof Error ? e.message : "حدث خطأ غير متوقع";
+      console.error("[handleStartOnline]", e);
+      setOnlineError(msg);
     } finally {
       setCreatingOnline(false);
     }
@@ -916,6 +921,12 @@ export default function NewSessionScreen() {
             },
           ]}
         >
+          {onlineError && (
+            <View style={styles.errorBanner}>
+              <Feather name="alert-circle" size={14} color="#FF6B6B" />
+              <Text style={styles.errorBannerText}>{onlineError}</Text>
+            </View>
+          )}
           {!isLastStep ? (
             <TouchableOpacity
               onPress={handleNext}
@@ -1156,4 +1167,23 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   nextBtnText: { fontFamily: Fonts.heading, fontSize: 18 },
+  errorBanner: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,107,107,0.12)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,107,107,0.3)",
+  },
+  errorBannerText: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: "#FF6B6B",
+    flex: 1,
+    textAlign: "right",
+  },
 });
