@@ -87,7 +87,9 @@ export default function Onboarding() {
       await updateUserName(name.trim());
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.replace("/(tabs)");
-    } catch (_) {
+    } catch (e: unknown) {
+      const msg = (e as { message?: string })?.message ?? "";
+      setError(msg || "تعذّر حفظ الاسم، حاول مرة ثانية");
     } finally {
       setLoading(false);
     }

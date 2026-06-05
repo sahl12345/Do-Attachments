@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -31,5 +31,19 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
+
+// Express 5 catches async errors automatically — this middleware formats them as JSON.
+// Must be defined AFTER routes and have 4 parameters.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const status =
+    (err as { status?: number })?.status ??
+    (err as { statusCode?: number })?.statusCode ??
+    500;
+  const message = err instanceof Error ? err.message : "Internal server error";
+  logger.error({ err }, "Unhandled route error");
+  if (!res.headersSent) {
+    res.status(status).json({ error: message });
+  }
+});
 
 export default app;

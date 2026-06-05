@@ -139,6 +139,7 @@ export default function SessionScreen() {
 
   // Debt tracker
   const [paidSet, setPaidSet] = useState<Set<string>>(new Set());
+  const [onlineActionError, setOnlineActionError] = useState<string | null>(null);
 
   // ── local session ──────────────────────────────────────────────────────────
   const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
@@ -261,8 +262,11 @@ export default function SessionScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       const data = await startOnlineSession(code, hostKey);
       setOnlineSession(data);
-    } catch (_e) {
+    } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      const msg = e instanceof Error ? e.message : "تعذّر بدء الجلسة";
+      console.error("[handleStartOnline]", e);
+      setOnlineActionError(msg);
     } finally {
       setStartingOnline(false);
     }
@@ -307,7 +311,11 @@ export default function SessionScreen() {
       } else {
         setOnlineSession(data);
       }
-    } catch (_e) {}
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "تعذّر تسجيل الجولة";
+      console.error("[handleAddOnlineRound]", e);
+      setOnlineActionError(msg);
+    }
   };
 
   const handleUndoOnline = () => {
@@ -323,7 +331,11 @@ export default function SessionScreen() {
             const data = await undoOnlineRound(code, hostKey);
             setOnlineSession(data);
             setShowWinner(false);
-          } catch (_e) {}
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : "تعذّر التراجع";
+            console.error("[handleUndoOnline]", e);
+            setOnlineActionError(msg);
+          }
         },
       },
     ]);
@@ -464,6 +476,15 @@ export default function SessionScreen() {
               },
             ]}
           >
+            {onlineActionError && (
+              <View style={styles.onlineErrorBanner}>
+                <Feather name="alert-circle" size={14} color="#FF6B6B" />
+                <Text style={styles.onlineErrorText}>{onlineActionError}</Text>
+                <TouchableOpacity onPress={() => setOnlineActionError(null)}>
+                  <Feather name="x" size={14} color="#FF6B6B" />
+                </TouchableOpacity>
+              </View>
+            )}
             <TouchableOpacity
               onPress={handleStartOnline}
               disabled={!canStart || startingOnline}
@@ -619,6 +640,16 @@ export default function SessionScreen() {
           <Text style={[styles.watcherText, { color: colors.gold }]}>
             {isHost ? "أنت صاحب الجلسة 👑" : "أي لاعب يقدر يسجّل الجولة"}
           </Text>
+        </View>
+      )}
+
+      {onlineActionError && (
+        <View style={styles.onlineErrorBanner}>
+          <Feather name="alert-circle" size={14} color="#FF6B6B" />
+          <Text style={styles.onlineErrorText}>{onlineActionError}</Text>
+          <TouchableOpacity onPress={() => setOnlineActionError(null)}>
+            <Feather name="x" size={14} color="#FF6B6B" />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1099,6 +1130,26 @@ const styles = StyleSheet.create({
   objectionBtnText: { fontSize: 14 },
   objectionBannerBox: { marginHorizontal: 16, marginBottom: 8, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 10 },
   objectionBannerText: { fontFamily: "Cairo_700Bold", fontSize: 14, textAlign: "center" },
+  onlineErrorBanner: {
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,107,107,0.12)",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,107,107,0.3)",
+  },
+  onlineErrorText: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: "#FF6B6B",
+    flex: 1,
+    textAlign: "right",
+  },
   // Debt tracker in winner
   debtSection: { width: "100%", borderRadius: 16, padding: 14, gap: 10 },
   debtTitle: { fontFamily: Fonts.body, fontSize: 13, textAlign: "center" },
