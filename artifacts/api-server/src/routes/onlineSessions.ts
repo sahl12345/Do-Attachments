@@ -1,8 +1,70 @@
-import { eq, lt } from "drizzle-orm";
+import { createClient } from "@supabase/supabase-js";
 import { Router, type IRouter } from "express";
-import { db, onlineSessionsTable, type OnlinePlayer, type OnlineRound, type PendingRound } from "@workspace/db";
 
-const router: IRouter = Router();
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  throw new Error(
+    "EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY must be set."
+  );
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const TABLE = "online_sessions";
+
+export interface OnlinePlayer {
+  id: string;
+  name: string;
+  isHost: boolean;
+}
+
+export interface OnlineRound {
+  id: string;
+  scores: Record<string, number>;
+  timestamp: number;
+  recordedBy?: string;
+}
+
+export interface PendingRound {
+  round: OnlineRound;
+  approvals: string[];
+  rejections: string[];
+  expiresAt: number;
+}
+
+interface DbRow {
+  code: string;
+  game_id: string;
+  players: OnlinePlayer[];
+  rounds: OnlineRound[];
+  pending_round: PendingRound | null;
+  target_score: number;
+  anti_cheat: boolean;
+  anti_cheat_timeout: number;
+  created_at: number;
+  started_at: number | null;
+  completed_at: number | null;
+  winner_id: string | null;
+}
+
+function toApi(row: DbRow) {
+  return {
+    code: row.code,
+    gameId: row.game_id,
+    players: row.players,
+    rounds: row.rounds,
+    pendingRound: row.pending_round,
+    targetScore: row.target_score,
+    antiCheat: row.anti_cheat,
+    antiCheatTimeout: row.anti_cheat_timeout,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    winnerId: row.winner_id,
+  };
+}
 
 function generateCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -12,29 +74,17 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 7);
 }
 
-async function getSession(code: string) {
-  const rows = await db
-    .select()
-    .from(onlineSessionsTable)
-    .where(eq(onlineSessionsTable.code, code));
-  return rows[0] ?? null;
+async function getSession(code: string): Promise<DbRow | null> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .eq("code", code)
+    .single();
+  if (error || !data) return null;
+  return data as DbRow;
 }
 
-function getPlayers(session: NonNullable<Awaited<ReturnType<typeof getSession>>>): OnlinePlayer[] {
-  return session.players as OnlinePlayer[];
-}
-
-function getRounds(session: NonNullable<Awaited<ReturnType<typeof getSession>>>): OnlineRound[] {
-  return session.rounds as OnlineRound[];
-}
-
-// Clean up sessions older than 24h — runs every hour
-setInterval(async () => {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  await db
-    .delete(onlineSessionsTable)
-    .where(lt(onlineSessionsTable.createdAt, cutoff));
-}, 60 * 60 * 1000);
+const router: IRouter = Router();
 
 // POST /api/online — Create session
 router.post("/online", async (req, res) => {
@@ -55,16 +105,21 @@ router.post("/online", async (req, res) => {
   const code = generateCode();
   const hostId = generateId();
 
-  await db.insert(onlineSessionsTable).values({
+  const { error } = await supabase.from(TABLE).insert({
     code,
-    gameId,
+    game_id: gameId,
     players: [{ id: hostId, name: hostName, isHost: true }],
     rounds: [],
-    targetScore: targetScore ?? 41,
-    antiCheat: antiCheat ?? false,
-    antiCheatTimeout: antiCheatTimeout ?? 10,
-    createdAt: Date.now(),
+    target_score: targetScore ?? 41,
+    anti_cheat: antiCheat ?? false,
+    anti_cheat_timeout: antiCheatTimeout ?? 10,
+    created_at: Date.now(),
   });
+
+  if (error) {
+    res.status(500).json({ error: error.message });
+    return;
+  }
 
   res.json({ code, hostPlayerId: hostId });
 });
@@ -76,7 +131,7 @@ router.get("/online/:code", async (req, res) => {
     res.status(404).json({ error: "Session not found" });
     return;
   }
-  res.json(session);
+  res.json(toApi(session));
 });
 
 // POST /api/online/:code/join — Join session
@@ -86,12 +141,11 @@ router.post("/online/:code/join", async (req, res) => {
     res.status(404).json({ error: "Session not found" });
     return;
   }
-  if (session.startedAt) {
+  if (session.started_at) {
     res.status(400).json({ error: "Session already started" });
     return;
   }
-  const players = getPlayers(session);
-  if (players.length >= 6) {
+  if (session.players.length >= 6) {
     res.status(400).json({ error: "Session is full" });
     return;
   }
@@ -104,17 +158,23 @@ router.post("/online/:code/join", async (req, res) => {
 
   const playerId = generateId();
   const newPlayers: OnlinePlayer[] = [
-    ...players,
+    ...session.players,
     { id: playerId, name, isHost: false },
   ];
 
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ players: newPlayers })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ players: newPlayers })
+    .eq("code", req.params.code)
+    .select()
+    .single();
 
-  res.json({ playerId, session: updated });
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
+
+  res.json({ playerId, session: toApi(data as DbRow) });
 });
 
 // POST /api/online/:code/start — Start session (host only)
@@ -126,28 +186,32 @@ router.post("/online/:code/start", async (req, res) => {
   }
 
   const { hostPlayerId } = req.body as { hostPlayerId: string };
-  const startPlayers = getPlayers(session);
-  const host = startPlayers.find((p) => p.id === hostPlayerId && p.isHost);
+  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
   if (!host) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
-  if (startPlayers.length < 2) {
+  if (session.players.length < 2) {
     res.status(400).json({ error: "Need at least 2 players" });
     return;
   }
 
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ startedAt: Date.now() })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ started_at: Date.now() })
+    .eq("code", req.params.code)
+    .select()
+    .single();
 
-  res.json(updated);
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
+
+  res.json(toApi(data as DbRow));
 });
 
 // POST /api/online/:code/round — Add round (any player)
-// If anti-cheat is enabled, stores as pendingRound instead of committing directly
 router.post("/online/:code/round", async (req, res) => {
   const session = await getSession(req.params.code);
   if (!session) {
@@ -160,9 +224,7 @@ router.post("/online/:code/round", async (req, res) => {
     scores: Record<string, number>;
   };
 
-  const roundPlayers = getPlayers(session);
-  const isPlayer = roundPlayers.some((p) => p.id === playerId);
-  if (!isPlayer) {
+  if (!session.players.some((p) => p.id === playerId)) {
     res.status(403).json({ error: "Not a player in this session" });
     return;
   }
@@ -174,31 +236,42 @@ router.post("/online/:code/round", async (req, res) => {
     recordedBy: playerId,
   };
 
-  // Anti-cheat: store as pending, require majority vote
-  if (session.antiCheat) {
-    const timeoutMs = (session.antiCheatTimeout ?? 10) * 1000;
+  if (session.anti_cheat) {
+    const timeoutMs = (session.anti_cheat_timeout ?? 10) * 1000;
     const pending: PendingRound = {
       round,
       approvals: [],
       rejections: [],
       expiresAt: Date.now() + timeoutMs,
     };
-    const [updated] = await db
-      .update(onlineSessionsTable)
-      .set({ pendingRound: pending })
-      .where(eq(onlineSessionsTable.code, req.params.code))
-      .returning();
-    res.json(updated);
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ pending_round: pending })
+      .eq("code", req.params.code)
+      .select()
+      .single();
+
+    if (error || !data) {
+      res.status(500).json({ error: error?.message ?? "Update failed" });
+      return;
+    }
+    res.json(toApi(data as DbRow));
     return;
   }
 
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ rounds: [...getRounds(session), round] })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ rounds: [...session.rounds, round] })
+    .eq("code", req.params.code)
+    .select()
+    .single();
 
-  res.json(updated);
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
+
+  res.json(toApi(data as DbRow));
 });
 
 // POST /api/online/:code/vote — Cast vote on pending round
@@ -214,20 +287,18 @@ router.post("/online/:code/vote", async (req, res) => {
     vote: "approve" | "reject";
   };
 
-  const votePlayers = getPlayers(session);
-  const isPlayer = votePlayers.some((p) => p.id === playerId);
-  if (!isPlayer) {
+  if (!session.players.some((p) => p.id === playerId)) {
     res.status(403).json({ error: "Not a player in this session" });
     return;
   }
 
-  const pending = session.pendingRound as PendingRound | null;
+  const pending = session.pending_round;
   if (!pending) {
     res.status(400).json({ error: "No pending round" });
     return;
   }
 
-  const majority = Math.ceil(votePlayers.length / 2);
+  const majority = Math.ceil(session.players.length / 2);
   const approvals = pending.approvals.includes(playerId)
     ? pending.approvals
     : vote === "approve"
@@ -239,39 +310,50 @@ router.post("/online/:code/vote", async (req, res) => {
     ? [...pending.rejections, playerId]
     : pending.rejections;
 
-  // Check timeout auto-approve
   const isExpired = Date.now() >= pending.expiresAt;
 
   if (approvals.length >= majority || isExpired) {
-    // Commit the round
-    const [updated] = await db
-      .update(onlineSessionsTable)
-      .set({ rounds: [...getRounds(session), pending.round], pendingRound: null })
-      .where(eq(onlineSessionsTable.code, req.params.code))
-      .returning();
-    res.json({ ...updated, voteResult: "approved" });
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ rounds: [...session.rounds, pending.round], pending_round: null })
+      .eq("code", req.params.code)
+      .select()
+      .single();
+    if (error || !data) {
+      res.status(500).json({ error: error?.message ?? "Update failed" });
+      return;
+    }
+    res.json({ ...toApi(data as DbRow), voteResult: "approved" });
     return;
   }
 
   if (rejections.length >= majority) {
-    // Reject — discard pending round
-    const [updated] = await db
-      .update(onlineSessionsTable)
-      .set({ pendingRound: null })
-      .where(eq(onlineSessionsTable.code, req.params.code))
-      .returning();
-    res.json({ ...updated, voteResult: "rejected" });
+    const { data, error } = await supabase
+      .from(TABLE)
+      .update({ pending_round: null })
+      .eq("code", req.params.code)
+      .select()
+      .single();
+    if (error || !data) {
+      res.status(500).json({ error: error?.message ?? "Update failed" });
+      return;
+    }
+    res.json({ ...toApi(data as DbRow), voteResult: "rejected" });
     return;
   }
 
-  // Still voting — update tally
   const updatedPending: PendingRound = { ...pending, approvals, rejections };
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ pendingRound: updatedPending })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
-  res.json({ ...updated, voteResult: "pending" });
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ pending_round: updatedPending })
+    .eq("code", req.params.code)
+    .select()
+    .single();
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
+  res.json({ ...toApi(data as DbRow), voteResult: "pending" });
 });
 
 // POST /api/online/:code/undo — Undo last round (host only)
@@ -283,22 +365,29 @@ router.post("/online/:code/undo", async (req, res) => {
   }
 
   const { hostPlayerId } = req.body as { hostPlayerId: string };
-  const undoPlayers = getPlayers(session);
-  const host = undoPlayers.find((p) => p.id === hostPlayerId && p.isHost);
+  const host = session.players.find((p) => p.id === hostPlayerId && p.isHost);
   if (!host) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
 
-  const newRounds = getRounds(session).slice(0, -1);
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({
+      rounds: session.rounds.slice(0, -1),
+      completed_at: null,
+      winner_id: null,
+    })
+    .eq("code", req.params.code)
+    .select()
+    .single();
 
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ rounds: newRounds, completedAt: null, winnerId: null })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
 
-  res.json(updated);
+  res.json(toApi(data as DbRow));
 });
 
 // POST /api/online/:code/complete — Mark complete
@@ -313,20 +402,25 @@ router.post("/online/:code/complete", async (req, res) => {
     playerId: string;
     winnerId: string;
   };
-  const completePlayers = getPlayers(session);
-  const isPlayer = completePlayers.some((p) => p.id === playerId);
-  if (!isPlayer) {
+
+  if (!session.players.some((p) => p.id === playerId)) {
     res.status(403).json({ error: "Not authorized" });
     return;
   }
 
-  const [updated] = await db
-    .update(onlineSessionsTable)
-    .set({ completedAt: Date.now(), winnerId })
-    .where(eq(onlineSessionsTable.code, req.params.code))
-    .returning();
+  const { data, error } = await supabase
+    .from(TABLE)
+    .update({ completed_at: Date.now(), winner_id: winnerId })
+    .eq("code", req.params.code)
+    .select()
+    .single();
 
-  res.json(updated);
+  if (error || !data) {
+    res.status(500).json({ error: error?.message ?? "Update failed" });
+    return;
+  }
+
+  res.json(toApi(data as DbRow));
 });
 
 export default router;
