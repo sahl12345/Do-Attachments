@@ -36,7 +36,7 @@ export interface OnlineSessionData {
 }
 
 const TABLE = "online_sessions";
-const TIMEOUT_MS = 12000;
+const TIMEOUT_MS = 30000;
 
 interface DbRow {
   code: string;
