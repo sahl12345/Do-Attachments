@@ -99,7 +99,7 @@ export function ConfettiBurst({ active }: { active: boolean }) {
   if (!active) return null;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: "none" }]}>
       <View style={styles.center}>
         {particles.map((p, i) => {
           const rotateStr = p.rotate.interpolate({

@@ -17,7 +17,12 @@ WebBrowser.maybeCompleteAuthSession();
 //             reads the session via detectSessionInUrl + exchangeCodeForSession
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WEB_REDIRECT = "https://do-attachments.replit.app/auth/callback";
+// Dynamically resolve the OAuth callback URL so it works on any domain
+// (Vercel, Replit preview, custom domain) without hardcoding.
+const WEB_REDIRECT =
+  typeof window !== "undefined"
+    ? `${window.location.origin}/auth/callback`
+    : "https://do-attachments.replit.app/auth/callback";
 const NATIVE_REDIRECT = "mobile://auth/callback";
 
 // ── Google OAuth ───────────────────────────────────────────────────────────────

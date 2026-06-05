@@ -630,7 +630,6 @@ export default function SessionScreen() {
 
       {/* AC flash overlay */}
       <Animated.View
-        pointerEvents="none"
         style={[
           styles.acFlashOverlay,
           {
