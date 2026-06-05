@@ -1,7 +1,7 @@
 {
   "version": 2,
   "framework": null,
-  "buildCommand": "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/mobile exec expo export --platform web",
+  "buildCommand": "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/mobile run export",
   "outputDirectory": "artifacts/mobile/dist",
   "functions": {
     "api/index.js": {
