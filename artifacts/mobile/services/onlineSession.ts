@@ -36,6 +36,7 @@ export interface OnlineSessionData {
 }
 
 const TABLE = "online_sessions";
+const TIMEOUT_MS = 12000;
 
 interface DbRow {
   code: string;
@@ -50,6 +51,15 @@ interface DbRow {
   started_at: number | null;
   completed_at: number | null;
   winner_id: string | null;
+}
+
+function withTimeout<T>(promise: PromiseLike<T>, ms = TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("انتهت مهلة الاتصال بالخادم")), ms)
+    ),
+  ]);
 }
 
 function toSession(row: DbRow): OnlineSessionData {
@@ -78,12 +88,10 @@ function generateId(): string {
 }
 
 async function getRow(code: string): Promise<DbRow> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select("*")
-    .eq("code", code)
-    .single();
-  if (error || !data) throw new Error(error?.message ?? "Session not found");
+  const { data, error } = await withTimeout(
+    supabase.from(TABLE).select("*").eq("code", code).single()
+  );
+  if (error || !data) throw new Error(error?.message ?? "الجلسة غير موجودة");
   return data as DbRow;
 }
 
@@ -97,16 +105,18 @@ export async function createOnlineSession(
   const code = generateCode();
   const hostPlayerId = generateId();
 
-  const { error } = await supabase.from(TABLE).insert({
-    code,
-    game_id: gameId,
-    players: [{ id: hostPlayerId, name: hostName, isHost: true }],
-    rounds: [],
-    target_score: targetScore,
-    anti_cheat: antiCheat ?? false,
-    anti_cheat_timeout: antiCheatTimeout ?? 10,
-    created_at: Date.now(),
-  });
+  const { error } = await withTimeout(
+    supabase.from(TABLE).insert({
+      code,
+      game_id: gameId,
+      players: [{ id: hostPlayerId, name: hostName, isHost: true }],
+      rounds: [],
+      target_score: targetScore,
+      anti_cheat: antiCheat ?? false,
+      anti_cheat_timeout: antiCheatTimeout ?? 10,
+      created_at: Date.now(),
+    })
+  );
 
   if (error) throw new Error(error.message);
   return { code, hostPlayerId };
@@ -123,8 +133,8 @@ export async function joinOnlineSession(
   name: string
 ): Promise<{ playerId: string; session: OnlineSessionData }> {
   const row = await getRow(code);
-  if (row.started_at) throw new Error("Session already started");
-  if (row.players.length >= 6) throw new Error("Session is full");
+  if (row.started_at) throw new Error("الجلسة بدأت بالفعل");
+  if (row.players.length >= 6) throw new Error("الجلسة ممتلئة");
 
   const playerId = generateId();
   const newPlayers: OnlinePlayer[] = [
@@ -132,14 +142,16 @@ export async function joinOnlineSession(
     { id: playerId, name, isHost: false },
   ];
 
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ players: newPlayers })
-    .eq("code", code)
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({ players: newPlayers })
+      .eq("code", code)
+      .select()
+      .single()
+  );
 
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  if (error || !data) throw new Error(error?.message ?? "فشل الانضمام");
   return { playerId, session: toSession(data as DbRow) };
 }
 
@@ -147,14 +159,16 @@ export async function startOnlineSession(
   code: string,
   _hostPlayerId: string
 ): Promise<OnlineSessionData> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ started_at: Date.now() })
-    .eq("code", code)
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({ started_at: Date.now() })
+      .eq("code", code)
+      .select()
+      .single()
+  );
 
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  if (error || !data) throw new Error(error?.message ?? "فشل بدء الجلسة");
   return toSession(data as DbRow);
 }
 
@@ -180,24 +194,28 @@ export async function addOnlineRound(
       rejections: [],
       expiresAt: Date.now() + timeoutMs,
     };
-    const { data, error } = await supabase
-      .from(TABLE)
-      .update({ pending_round: pending })
-      .eq("code", code)
-      .select()
-      .single();
-    if (error || !data) throw new Error(error?.message ?? "Update failed");
+    const { data, error } = await withTimeout(
+      supabase
+        .from(TABLE)
+        .update({ pending_round: pending })
+        .eq("code", code)
+        .select()
+        .single()
+    );
+    if (error || !data) throw new Error(error?.message ?? "فشل تسجيل الجولة");
     return toSession(data as DbRow);
   }
 
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ rounds: [...row.rounds, round] })
-    .eq("code", code)
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({ rounds: [...row.rounds, round] })
+      .eq("code", code)
+      .select()
+      .single()
+  );
 
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  if (error || !data) throw new Error(error?.message ?? "فشل تسجيل الجولة");
   return toSession(data as DbRow);
 }
 
@@ -207,18 +225,20 @@ export async function undoOnlineRound(
 ): Promise<OnlineSessionData> {
   const row = await getRow(code);
 
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({
-      rounds: row.rounds.slice(0, -1),
-      completed_at: null,
-      winner_id: null,
-    })
-    .eq("code", code)
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({
+        rounds: row.rounds.slice(0, -1),
+        completed_at: null,
+        winner_id: null,
+      })
+      .eq("code", code)
+      .select()
+      .single()
+  );
 
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  if (error || !data) throw new Error(error?.message ?? "فشل التراجع");
   return toSession(data as DbRow);
 }
 
@@ -227,14 +247,16 @@ export async function completeOnlineSession(
   _playerId: string,
   winnerId: string
 ): Promise<OnlineSessionData> {
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ completed_at: Date.now(), winner_id: winnerId })
-    .eq("code", code)
-    .select()
-    .single();
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({ completed_at: Date.now(), winner_id: winnerId })
+      .eq("code", code)
+      .select()
+      .single()
+  );
 
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  if (error || !data) throw new Error(error?.message ?? "فشل إنهاء الجلسة");
   return toSession(data as DbRow);
 }
 
@@ -245,7 +267,7 @@ export async function voteOnlineRound(
 ): Promise<OnlineSessionData & { voteResult?: "approved" | "rejected" | "pending" }> {
   const row = await getRow(code);
   const pending = row.pending_round;
-  if (!pending) throw new Error("No pending round");
+  if (!pending) throw new Error("لا توجد جولة معلقة");
 
   const majority = Math.ceil(row.players.length / 2);
 
@@ -264,34 +286,40 @@ export async function voteOnlineRound(
   const isExpired = Date.now() >= pending.expiresAt;
 
   if (approvals.length >= majority || isExpired) {
-    const { data, error } = await supabase
-      .from(TABLE)
-      .update({ rounds: [...row.rounds, pending.round], pending_round: null })
-      .eq("code", code)
-      .select()
-      .single();
-    if (error || !data) throw new Error(error?.message ?? "Update failed");
+    const { data, error } = await withTimeout(
+      supabase
+        .from(TABLE)
+        .update({ rounds: [...row.rounds, pending.round], pending_round: null })
+        .eq("code", code)
+        .select()
+        .single()
+    );
+    if (error || !data) throw new Error(error?.message ?? "فشل التصويت");
     return { ...toSession(data as DbRow), voteResult: "approved" };
   }
 
   if (rejections.length >= majority) {
-    const { data, error } = await supabase
-      .from(TABLE)
-      .update({ pending_round: null })
-      .eq("code", code)
-      .select()
-      .single();
-    if (error || !data) throw new Error(error?.message ?? "Update failed");
+    const { data, error } = await withTimeout(
+      supabase
+        .from(TABLE)
+        .update({ pending_round: null })
+        .eq("code", code)
+        .select()
+        .single()
+    );
+    if (error || !data) throw new Error(error?.message ?? "فشل التصويت");
     return { ...toSession(data as DbRow), voteResult: "rejected" };
   }
 
   const updatedPending: PendingRound = { ...pending, approvals, rejections };
-  const { data, error } = await supabase
-    .from(TABLE)
-    .update({ pending_round: updatedPending })
-    .eq("code", code)
-    .select()
-    .single();
-  if (error || !data) throw new Error(error?.message ?? "Update failed");
+  const { data, error } = await withTimeout(
+    supabase
+      .from(TABLE)
+      .update({ pending_round: updatedPending })
+      .eq("code", code)
+      .select()
+      .single()
+  );
+  if (error || !data) throw new Error(error?.message ?? "فشل التصويت");
   return { ...toSession(data as DbRow), voteResult: "pending" };
 }
