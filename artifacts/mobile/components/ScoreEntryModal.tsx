@@ -123,17 +123,23 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
   const teamName = (t: 0 | 1) => teams[t].map((p) => p.name).join(" / ");
   const otherTeam: 0 | 1 = biddingTeam === 0 ? 1 : 0;
 
+  const kaboutBonus = bid === 13 ? 26 : 16;
+
   function calcScores(winnerTeam: 0 | 1): Record<string, number> {
     const bidderWon = winnerTeam === biddingTeam;
     let bidderScore: number;
+    let otherScore: number;
     if (kabout) {
-      bidderScore = bidderWon ? (bid === 13 ? 26 : 16) : (bid === 13 ? -26 : -16);
+      bidderScore = bidderWon ? kaboutBonus : -kaboutBonus;
+      otherScore = bidderWon ? 0 : kaboutBonus;
     } else {
-      bidderScore = bidderWon ? bid : (rules?.penaltyOnFail ?? true ? -bid : 0);
+      const penalty = rules?.penaltyOnFail ?? true ? bid : 0;
+      bidderScore = bidderWon ? bid : -penalty;
+      otherScore = bidderWon ? 0 : penalty;
     }
     const sc: Record<string, number> = {};
     teams[biddingTeam].forEach((p) => { sc[p.id] = bidderScore; });
-    teams[otherTeam].forEach((p) => { sc[p.id] = 0; });
+    teams[otherTeam].forEach((p) => { sc[p.id] = otherScore; });
     return sc;
   }
 
@@ -142,8 +148,9 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
     onSubmit(calcScores(winnerTeam));
   };
 
-  const biddingWinScore = kabout ? (bid === 13 ? 26 : 16) : bid;
-  const biddingLoseScore = kabout ? (bid === 13 ? -26 : -16) : (rules?.penaltyOnFail ?? true ? -bid : 0);
+  const biddingWinScore = kabout ? kaboutBonus : bid;
+  const biddingLoseScore = kabout ? -kaboutBonus : (rules?.penaltyOnFail ?? true ? -bid : 0);
+  const otherWinScore = kabout ? kaboutBonus : (rules?.penaltyOnFail ?? true ? bid : 0);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -207,11 +214,14 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
         style={[tnStyles.winBtn, { backgroundColor: `${colors.red}18`, borderColor: `${colors.red}55` }]}
       >
         <View style={tnStyles.winBtnInner}>
-          <Text style={[tnStyles.winBtnLabel, { color: colors.textMuted }]}>الفريق الثاني</Text>
+          <Text style={[tnStyles.winBtnLabel, { color: colors.textMuted }]}>الفريق الثاني كسّر</Text>
           <Text style={[tnStyles.winBtnName, { color: colors.text }]} numberOfLines={1}>{teamName(otherTeam)}</Text>
+          <Text style={[tnStyles.winBtnSub, { color: colors.red }]}>
+            المزايد: {biddingLoseScore >= 0 ? `+${biddingLoseScore}` : `${biddingLoseScore}`}
+          </Text>
         </View>
-        <Text style={[tnStyles.winBtnScore, { color: colors.red, fontFamily: Fonts.mono }]}>
-          {biddingLoseScore >= 0 ? `+${biddingLoseScore}` : `${biddingLoseScore}`} للمزايد
+        <Text style={[tnStyles.winBtnScore, { color: colors.success, fontFamily: Fonts.mono }]}>
+          {otherWinScore >= 0 ? `+${otherWinScore}` : `${otherWinScore}`}
         </Text>
       </TouchableOpacity>
 
@@ -224,9 +234,10 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
 
 const tnStyles = StyleSheet.create({
   winBtn: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", padding: 16, borderRadius: 16, borderWidth: 1.5, marginBottom: 12 },
-  winBtnInner: { flex: 1, alignItems: "flex-end" },
-  winBtnLabel: { fontFamily: Fonts.body, fontSize: 12, marginBottom: 2 },
+  winBtnInner: { flex: 1, alignItems: "flex-end", gap: 2 },
+  winBtnLabel: { fontFamily: Fonts.body, fontSize: 12 },
   winBtnName: { fontFamily: Fonts.heading, fontSize: 16 },
+  winBtnSub: { fontFamily: Fonts.mono, fontSize: 12 },
   winBtnScore: { fontSize: 24 },
 });
 
