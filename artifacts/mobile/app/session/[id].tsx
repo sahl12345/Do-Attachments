@@ -122,6 +122,9 @@ export default function SessionScreen() {
   // Mandatory: keep screen awake during active session
   useKeepAwake();
 
+  // ── local session ──────────────────────────────────────────────────────────
+  const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
+
   const [showScoreModal, setShowScoreModal] = useState(false);
   const [showWinner, setShowWinner] = useState(false);
   const [onlineSession, setOnlineSession] = useState<OnlineSessionData | null>(null);
@@ -142,9 +145,6 @@ export default function SessionScreen() {
     () => localSession?.orders ?? {}
   );
   const [onlineActionError, setOnlineActionError] = useState<string | null>(null);
-
-  // ── local session ──────────────────────────────────────────────────────────
-  const localSession = !isOnline ? sessions.find((s) => s.id === id) : undefined;
   const localGame = localSession ? getGameById(localSession.gameId) : null;
 
 
