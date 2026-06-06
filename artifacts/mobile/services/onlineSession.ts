@@ -1,19 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
-
-// Lightweight client for online sessions — no auth/session overhead
-// so it never waits for AsyncStorage initialization on web
-const supabase = createClient(
-  process.env.EXPO_PUBLIC_SUPABASE_URL!,
-  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-      storageKey: "online-session-anon",
-    },
-  }
-);
+import { supabase } from "@/lib/supabase";
 
 export interface OnlinePlayer {
   id: string;
@@ -119,8 +104,6 @@ export async function createOnlineSession(
 ): Promise<{ code: string; hostPlayerId: string }> {
   const code = generateCode();
   const hostPlayerId = generateId();
-
-  console.log("[createOnlineSession] START", { code, gameId, targetScore });
 
   const { error } = await withTimeout(
     supabase.from(TABLE).insert({
