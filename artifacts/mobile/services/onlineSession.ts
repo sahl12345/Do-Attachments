@@ -4,6 +4,7 @@ export interface OnlinePlayer {
   id: string;
   name: string;
   isHost: boolean;
+  order?: string;
 }
 
 export interface OnlineRound {
@@ -240,6 +241,20 @@ export async function undoOnlineRound(
 
   if (error || !data) throw new Error(error?.message ?? "فشل التراجع");
   return toSession(data as DbRow);
+}
+
+export async function updatePlayerOrder(
+  code: string,
+  playerId: string,
+  orderText: string
+): Promise<void> {
+  const row = await getRow(code);
+  const updatedPlayers = row.players.map((p) =>
+    p.id === playerId ? { ...p, order: orderText } : p
+  );
+  await withTimeout(
+    supabase.from(TABLE).update({ players: updatedPlayers }).eq("code", code)
+  );
 }
 
 export async function completeOnlineSession(

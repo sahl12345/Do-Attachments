@@ -36,6 +36,8 @@ import {
   getOnlineSession,
   startOnlineSession,
   undoOnlineRound,
+  updatePlayerOrder,
+  voteOnlineRound,
 } from "@/services/onlineSession";
 import { useColors } from "@/hooks/useColors";
 
@@ -140,6 +142,8 @@ export default function SessionScreen() {
   const [objectorName, setObjectorName] = useState<string | null>(null);
   const [objectionBanner, setObjectionBanner] = useState<string | null>(null);
   const objectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orderUpdateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingSecsLeft, setPendingSecsLeft] = useState(0);
 
   const [sessionOrders, setSessionOrders] = useState<Record<string, string>>(
     () => localSession?.orders ?? {}
@@ -257,16 +261,20 @@ export default function SessionScreen() {
   };
 
   const handleSetOrder = useCallback(
-    (playerId: string, text: string) => {
+    (pid: string, text: string) => {
       setSessionOrders((prev) => {
-        const updated = { ...prev, [playerId]: text };
-        if (!isOnline && id) {
-          updateSession(id, { orders: updated });
-        }
+        const updated = { ...prev, [pid]: text };
+        if (!isOnline && id) updateSession(id, { orders: updated });
         return updated;
       });
+      if (isOnline && code) {
+        if (orderUpdateTimerRef.current) clearTimeout(orderUpdateTimerRef.current);
+        orderUpdateTimerRef.current = setTimeout(() => {
+          updatePlayerOrder(code, pid, text).catch(() => {});
+        }, 900);
+      }
     },
-    [isOnline, id, updateSession]
+    [isOnline, id, code, updateSession]
   );
 
   // ── ONLINE GAME LOGIC ──────────────────────────────────────────────────────
@@ -311,6 +319,16 @@ export default function SessionScreen() {
     return () => clearInterval(interval);
   }, [isOnline, syncOnline]);
 
+  useEffect(() => {
+    const pending = onlineSession?.pendingRound;
+    if (!pending) { setPendingSecsLeft(0); return; }
+    const update = () =>
+      setPendingSecsLeft(Math.max(0, Math.ceil((pending.expiresAt - Date.now()) / 1000)));
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [onlineSession?.pendingRound]);
+
 
   const handleAddOnlineRound = async (scores: Record<string, number>) => {
     if (!code || !myOnlinePlayerId || !onlineSession) return;
@@ -354,6 +372,29 @@ export default function SessionScreen() {
         },
       },
     ]);
+  };
+
+  const handleVoteRound = async (vote: "approve" | "reject") => {
+    if (!code || !myOnlinePlayerId || !onlineSession) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    try {
+      const data = await voteOnlineRound(code, myOnlinePlayerId, vote);
+      if (data.voteResult === "approved") {
+        const winnerId = checkOnlineWinner(data);
+        if (winnerId) {
+          const completed = await completeOnlineSession(code, myOnlinePlayerId, winnerId);
+          setOnlineSession(completed);
+          setTimeout(() => setShowWinner(true), 300);
+        } else {
+          setOnlineSession(data);
+        }
+      } else {
+        setOnlineSession(data);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "تعذّر التصويت";
+      setOnlineActionError(msg);
+    }
   };
 
   // ── RENDER ─────────────────────────────────────────────────────────────────
@@ -553,10 +594,8 @@ export default function SessionScreen() {
     ? sessionPlayers.find((p) => p.id === sessionWinnerId)
     : null;
 
-  // Any player in the online session can record rounds
-  const canAddRound = isOnline
-    ? !!onlineSession && onlineSession.players.some((p) => p.id === myOnlinePlayerId)
-    : true;
+  // Only host can record rounds in online sessions
+  const canAddRound = isOnline ? (isHost && !!onlineSession) : true;
   const isComplete = !!(session?.completedAt);
   const isFourPlayer = sessionPlayers.length === 4;
   const isTwoPlayer = sessionPlayers.length === 2;
@@ -695,6 +734,63 @@ export default function SessionScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Pending round voting ────────────────────────────────────────── */}
+        {isOnline && onlineSession?.pendingRound && (() => {
+          const pending = onlineSession.pendingRound!;
+          const myVotedApprove = pending.approvals.includes(myOnlinePlayerId ?? "");
+          const myVotedReject = pending.rejections.includes(myOnlinePlayerId ?? "");
+          const myVoted = myVotedApprove || myVotedReject;
+          const majority = Math.ceil(onlineSession.players.length / 2);
+          const recorder = onlineSession.players.find((p) => p.id === pending.round.recordedBy);
+          return (
+            <View style={[pndStyles.card, { backgroundColor: `${colors.gold}12`, borderColor: `${colors.gold}40` }]}>
+              <View style={pndStyles.header}>
+                <Text style={[pndStyles.title, { color: colors.gold }]}>⏳ جولة تحتاج موافقة</Text>
+                <Text style={[pndStyles.countdown, { color: colors.textDim }]}>{pendingSecsLeft}ث</Text>
+              </View>
+              {recorder && (
+                <Text style={[pndStyles.by, { color: colors.textMuted }]}>سجّلها: {recorder.name}</Text>
+              )}
+              <View style={pndStyles.scores}>
+                {onlineSession.players.map((p) => {
+                  const sc = pending.round.scores[p.id] ?? 0;
+                  return (
+                    <View key={p.id} style={pndStyles.scoreItem}>
+                      <Text style={[pndStyles.scoreName, { color: colors.textMuted }]} numberOfLines={1}>{p.name}</Text>
+                      <Text style={[pndStyles.scoreVal, { color: sc >= 0 ? colors.success : colors.red, fontFamily: Fonts.mono }]}>
+                        {sc >= 0 ? `+${sc}` : `${sc}`}
+                      </Text>
+                    </View>
+                  );
+                })}
+              </View>
+              <Text style={[pndStyles.tally, { color: colors.textDim }]}>
+                موافق: {pending.approvals.length} | رافض: {pending.rejections.length} | يلزم: {majority}
+              </Text>
+              {!myVoted ? (
+                <View style={pndStyles.btns}>
+                  <TouchableOpacity
+                    onPress={() => handleVoteRound("reject")}
+                    style={[pndStyles.voteBtn, { backgroundColor: `${colors.red}22`, borderColor: colors.red }]}
+                  >
+                    <Text style={[pndStyles.voteBtnText, { color: colors.red }]}>✗ اعتراض</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => handleVoteRound("approve")}
+                    style={[pndStyles.voteBtn, { backgroundColor: `${colors.success}22`, borderColor: colors.success }]}
+                  >
+                    <Text style={[pndStyles.voteBtnText, { color: colors.success }]}>✓ موافق</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={[pndStyles.voted, { color: colors.textDim }]}>
+                  {myVotedApprove ? "✓ وافقت" : "✗ اعترضت"} — بانتظار باقي اللاعبين
+                </Text>
+              )}
+            </View>
+          );
+        })()}
+
         {isFourPlayer ? (
           <>
             <View style={styles.scoreRow}>
@@ -750,22 +846,34 @@ export default function SessionScreen() {
         {/* ── تسجيل الطلبات ─────────────────────────────────────────────── */}
         <View style={[styles.ordersSection, { backgroundColor: colors.surface }]}>
           <Text style={[styles.ordersTitle, { color: colors.textMuted }]}>☕ تسجيل الطلبات</Text>
-          {sessionPlayers.map((p) => (
-            <View key={p.id} style={[styles.orderRow, { borderTopColor: colors.border }]}>
-              <TextInput
-                style={[
-                  styles.orderInput,
-                  { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
-                ]}
-                placeholder="اكتب طلبك..."
-                placeholderTextColor={colors.textDim}
-                value={sessionOrders[p.id] ?? ""}
-                onChangeText={(text) => handleSetOrder(p.id, text)}
-                textAlign="right"
-              />
-              <Text style={[styles.orderName, { color: colors.text }]}>{p.name}</Text>
-            </View>
-          ))}
+          {sessionPlayers.map((p) => {
+            const isMyOrder = !isOnline || p.id === myOnlinePlayerId;
+            const orderVal = isOnline && !isMyOrder
+              ? (onlineSession?.players.find((op) => op.id === p.id)?.order ?? "")
+              : (sessionOrders[p.id] ?? "");
+            return (
+              <View key={p.id} style={[styles.orderRow, { borderTopColor: colors.border }]}>
+                {isMyOrder ? (
+                  <TextInput
+                    style={[
+                      styles.orderInput,
+                      { backgroundColor: colors.background, color: colors.text, borderColor: colors.border },
+                    ]}
+                    placeholder="اكتب طلبك..."
+                    placeholderTextColor={colors.textDim}
+                    value={orderVal}
+                    onChangeText={(text) => handleSetOrder(p.id, text)}
+                    textAlign="right"
+                  />
+                ) : (
+                  <Text style={[styles.orderValue, { color: orderVal ? colors.text : colors.textDim }]}>
+                    {orderVal || "—"}
+                  </Text>
+                )}
+                <Text style={[styles.orderName, { color: colors.text }]}>{p.name}</Text>
+              </View>
+            );
+          })}
         </View>
 
         {sessionRounds.length > 0 && (
@@ -1213,4 +1321,21 @@ const styles = StyleSheet.create({
   winnerPrimaryText: { fontFamily: Fonts.heading, fontSize: 17 },
   winnerSecBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   winnerSecText: { fontFamily: Fonts.heading, fontSize: 15 },
+});
+
+const pndStyles = StyleSheet.create({
+  card: { borderRadius: 16, borderWidth: 1.5, padding: 14, marginBottom: 10, gap: 8 },
+  header: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center" },
+  title: { fontFamily: Fonts.heading, fontSize: 15 },
+  countdown: { fontFamily: Fonts.mono, fontSize: 14 },
+  by: { fontFamily: Fonts.body, fontSize: 12, textAlign: "right" },
+  scores: { flexDirection: "row-reverse", gap: 8, flexWrap: "wrap" },
+  scoreItem: { alignItems: "center", gap: 2, minWidth: 50 },
+  scoreName: { fontFamily: Fonts.body, fontSize: 11, textAlign: "center" },
+  scoreVal: { fontSize: 16 },
+  tally: { fontFamily: Fonts.body, fontSize: 12, textAlign: "center" },
+  btns: { flexDirection: "row", gap: 10 },
+  voteBtn: { flex: 1, paddingVertical: 11, borderRadius: 12, alignItems: "center", borderWidth: 1.5 },
+  voteBtnText: { fontFamily: Fonts.heading, fontSize: 15 },
+  voted: { fontFamily: Fonts.body, fontSize: 13, textAlign: "center" },
 });

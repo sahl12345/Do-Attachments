@@ -114,67 +114,60 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
   const [biddingTeam, setBiddingTeam] = useState<0 | 1>(0);
   const minBid = rules?.minBid ?? 7;
   const [bid, setBid] = useState(minBid);
-  const [tricks, setTricks] = useState(minBid);
   const [kabout, setKabout] = useState(false);
 
   const teamA = [players[0], players[2]].filter(Boolean);
   const teamB = [players[1], players[3]].filter(Boolean);
+  const teams = [teamA, teamB] as const;
 
-  const otherTricks = 13 - tricks;
-  const failScore = bid === 13 ? -16 : (rules?.penaltyOnFail ?? true) ? -bid : 0;
-  const successScore = (rules?.doubleBid && tricks === bid) ? bid * 2 : tricks;
-  const biddingSucceeds = !kabout && tricks >= bid;
-  const biddingScore = kabout
-    ? bid === 13 ? 26 : 16
-    : biddingSucceeds ? successScore : failScore;
-  // other team gets their tricks only when bidding team fails; 0 on success/kabout
-  const otherScore = kabout || biddingSucceeds ? 0 : otherTricks;
-  const aScore = biddingTeam === 0 ? biddingScore : otherScore;
-  const bScore = biddingTeam === 1 ? biddingScore : otherScore;
+  const teamName = (t: 0 | 1) => teams[t].map((p) => p.name).join(" / ");
+  const otherTeam: 0 | 1 = biddingTeam === 0 ? 1 : 0;
 
-  const confirm = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const s: Record<string, number> = {};
-    teamA.forEach((p) => { s[p.id] = aScore; });
-    teamB.forEach((p) => { s[p.id] = bScore; });
-    onSubmit(s);
+  function calcScores(winnerTeam: 0 | 1): Record<string, number> {
+    const bidderWon = winnerTeam === biddingTeam;
+    let bidderScore: number;
+    if (kabout) {
+      bidderScore = bidderWon ? (bid === 13 ? 26 : 16) : (bid === 13 ? -26 : -16);
+    } else {
+      bidderScore = bidderWon ? bid : (rules?.penaltyOnFail ?? true ? -bid : 0);
+    }
+    const sc: Record<string, number> = {};
+    teams[biddingTeam].forEach((p) => { sc[p.id] = bidderScore; });
+    teams[otherTeam].forEach((p) => { sc[p.id] = 0; });
+    return sc;
+  }
+
+  const handleWin = (winnerTeam: 0 | 1) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    onSubmit(calcScores(winnerTeam));
   };
+
+  const biddingWinScore = kabout ? (bid === 13 ? 26 : 16) : bid;
+  const biddingLoseScore = kabout ? (bid === 13 ? -26 : -16) : (rules?.penaltyOnFail ?? true ? -bid : 0);
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <Text style={[s.label, { color: colors.textMuted }]}>الفريق المزايد</Text>
       <View style={s.teamRow}>
-        {[teamA, teamB].map((team, t) => (
+        {([0, 1] as const).map((t) => (
           <TouchableOpacity
             key={t}
-            onPress={() => { Haptics.selectionAsync(); setBiddingTeam(t as 0 | 1); }}
+            onPress={() => { Haptics.selectionAsync(); setBiddingTeam(t); }}
             style={[s.teamBtn, biddingTeam === t
               ? { backgroundColor: colors.gold }
               : { backgroundColor: colors.surfaceRaised, borderColor: colors.border, borderWidth: 1 }]}
           >
             <Text numberOfLines={1} style={[s.teamBtnText, { color: biddingTeam === t ? colors.background : colors.textMuted }]}>
-              {team.map((p) => p.name).join(" / ")}
+              {teamName(t)}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
-      <View style={[s.divider, { backgroundColor: colors.border }]} />
-
-      {!kabout && (
-        <>
-          <Text style={[s.label, { color: colors.textMuted }]}>المزايدة (الحد الأدنى: {minBid})</Text>
-          <View style={s.centered}>
-            <Stepper value={bid} onChange={setBid} min={minBid} max={13} colors={colors} />
-          </View>
-
-          <Text style={[s.label, { color: colors.textMuted }]}>لطشات الفريق المزايد</Text>
-          <View style={s.centered}>
-            <Stepper value={tricks} onChange={setTricks} min={0} max={13} colors={colors} />
-            <Text style={[s.subHint, { color: colors.textDim }]}>الفريق الثاني: {otherTricks} لطشة</Text>
-          </View>
-        </>
-      )}
+      <Text style={[s.label, { color: colors.textMuted }]}>الطلبة (الحد الأدنى: {minBid})</Text>
+      <View style={s.centered}>
+        <Stepper value={bid} onChange={setBid} min={minBid} max={13} colors={colors} />
+      </View>
 
       <TouchableOpacity
         onPress={() => { Haptics.selectionAsync(); setKabout((v) => !v); }}
@@ -187,26 +180,55 @@ function TarneebEntry({ players, rules, onSubmit, onClose }: { players: Player[]
         </Text>
       </TouchableOpacity>
       {kabout && (
-        <Text style={[s.hint, { color: colors.textDim }]}>بمزايدة ١٣: +٢٦  |  بدون مزايدة: +١٦  |  الخصم: ٠</Text>
+        <Text style={[s.hint, { color: colors.textDim }]}>
+          مزايدة ١٣: فوز +٢٦ / خسارة -٢٦  •  بدون ١٣: فوز +١٦ / خسارة -١٦
+        </Text>
       )}
 
-      <View style={[s.preview, { backgroundColor: colors.surface }]}>
-        <Text style={[s.previewTitle, { color: colors.textMuted }]}>النتيجة</Text>
-        {[{ name: teamA.map((p) => p.name).join(" / "), score: aScore }, { name: teamB.map((p) => p.name).join(" / "), score: bScore }]
-          .map(({ name, score }, i) => (
-          <View key={i} style={s.previewRow}>
-            <Text style={[s.previewScore, { color: score < 0 ? colors.red : colors.success, fontFamily: Fonts.mono }]}>
-              {score >= 0 ? `+${score}` : `${score}`}
-            </Text>
-            <Text style={[s.previewName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
-          </View>
-        ))}
-      </View>
+      <View style={[s.divider, { backgroundColor: colors.border }]} />
 
-      <Actions onClose={onClose} onConfirm={confirm} colors={colors} />
+      <Text style={[s.label, { color: colors.textMuted, textAlign: "center", marginBottom: 8 }]}>مين فاز بالجولة؟</Text>
+
+      <TouchableOpacity
+        onPress={() => handleWin(biddingTeam)}
+        style={[tnStyles.winBtn, { backgroundColor: `${colors.success}18`, borderColor: `${colors.success}55` }]}
+      >
+        <View style={tnStyles.winBtnInner}>
+          <Text style={[tnStyles.winBtnLabel, { color: colors.textMuted }]}>الفريق المزايد</Text>
+          <Text style={[tnStyles.winBtnName, { color: colors.text }]} numberOfLines={1}>{teamName(biddingTeam)}</Text>
+        </View>
+        <Text style={[tnStyles.winBtnScore, { color: colors.success, fontFamily: Fonts.mono }]}>
+          {biddingWinScore >= 0 ? `+${biddingWinScore}` : `${biddingWinScore}`}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => handleWin(otherTeam)}
+        style={[tnStyles.winBtn, { backgroundColor: `${colors.red}18`, borderColor: `${colors.red}55` }]}
+      >
+        <View style={tnStyles.winBtnInner}>
+          <Text style={[tnStyles.winBtnLabel, { color: colors.textMuted }]}>الفريق الثاني</Text>
+          <Text style={[tnStyles.winBtnName, { color: colors.text }]} numberOfLines={1}>{teamName(otherTeam)}</Text>
+        </View>
+        <Text style={[tnStyles.winBtnScore, { color: colors.red, fontFamily: Fonts.mono }]}>
+          {biddingLoseScore >= 0 ? `+${biddingLoseScore}` : `${biddingLoseScore}`} للمزايد
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={onClose} style={[actStyles.cancel, { borderColor: colors.borderStrong, marginTop: 4 }]}>
+        <Text style={[actStyles.cancelText, { color: colors.textMuted }]}>إلغاء</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }
+
+const tnStyles = StyleSheet.create({
+  winBtn: { flexDirection: "row-reverse", justifyContent: "space-between", alignItems: "center", padding: 16, borderRadius: 16, borderWidth: 1.5, marginBottom: 12 },
+  winBtnInner: { flex: 1, alignItems: "flex-end" },
+  winBtnLabel: { fontFamily: Fonts.body, fontSize: 12, marginBottom: 2 },
+  winBtnName: { fontFamily: Fonts.heading, fontSize: 16 },
+  winBtnScore: { fontSize: 24 },
+});
 
 // ─── TERKIS ENTRY (corrected scoring per spec) ────────────────────────────────
 const TERKIS_CONTRACTS = [
